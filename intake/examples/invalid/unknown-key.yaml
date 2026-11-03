@@ -1,0 +1,7 @@
+# expect: SCHEMA
+schema_version: 1
+project: {name: demo-app, prefix: demo}
+platform: {version: v0.1.0}
+runtime: {kind: lambda-web, colour: blue}
+envs:
+  dev: {account: dev, region: ap-southeast-1}

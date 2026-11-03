@@ -1,0 +1,7 @@
+# expect: PARSE
+schema_version: 1
+project: {name: demo-app, prefix: demo}
+platform: {version: v0.1.0}
+runtime: &rt {kind: lambda-web}
+envs:
+  dev: {account: dev, region: ap-southeast-1}

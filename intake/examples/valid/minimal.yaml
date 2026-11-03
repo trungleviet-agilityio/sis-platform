@@ -1,0 +1,8 @@
+# yaml-language-server: $schema=../../schema/platform.schema.json
+# One env, defaults only: lambda-web, GitHub Actions, no budget or DR stated.
+schema_version: 1
+project: {name: demo-app, prefix: demo}
+platform: {version: v0.1.0}
+runtime: {kind: lambda-web}
+envs:
+  dev: {account: dev, region: ap-southeast-1}

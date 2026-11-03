@@ -1,0 +1,73 @@
+{
+  "version": 1,
+  "note": "adapter_built is false for every runtime in Phase 0 (no adapters exist yet); the owning phase flips its flag.",
+  "runtimes": {
+    "lambda-web": {
+      "strategies": ["all-at-once", "canary", "linear"],
+      "engines": ["pipeline", "codedeploy"],
+      "auto_engine": "pipeline",
+      "engine_strategies": {},
+      "gitops": "error",
+      "hints": {
+        "rolling": "alias flip = all-at-once; use all-at-once, canary or linear",
+        "blue-green": "alias flip = all-at-once; use all-at-once, canary or linear"
+      },
+      "adapter_built": false
+    },
+    "lambda-events": {
+      "strategies": ["all-at-once", "canary", "linear"],
+      "engines": ["pipeline", "codedeploy"],
+      "auto_engine": "pipeline",
+      "engine_strategies": {},
+      "gitops": "error",
+      "hints": {
+        "rolling": "alias flip = all-at-once; use all-at-once, canary or linear",
+        "blue-green": "alias flip = all-at-once; use all-at-once, canary or linear"
+      },
+      "adapter_built": false
+    },
+    "ecs-fargate": {
+      "strategies": ["all-at-once", "rolling", "canary", "linear", "blue-green"],
+      "engines": ["ecs-native", "codedeploy", "pipeline"],
+      "auto_engine": "ecs-native",
+      "engine_strategies": {"pipeline": ["rolling"]},
+      "gitops": "error",
+      "hints": {},
+      "adapter_built": false
+    },
+    "ec2-asg": {
+      "strategies": ["rolling", "canary", "blue-green"],
+      "engines": ["asg", "codedeploy"],
+      "auto_engine": "asg",
+      "engine_strategies": {},
+      "gitops": "error",
+      "hints": {
+        "all-at-once": "an ASG deploys by instance refresh; use rolling, canary or blue-green"
+      },
+      "adapter_built": false
+    },
+    "eks-workload": {
+      "strategies": ["rolling", "canary", "blue-green"],
+      "engines": ["argo-rollouts"],
+      "auto_engine": "argo-rollouts",
+      "engine_strategies": {},
+      "gitops": "recommended",
+      "hints": {
+        "all-at-once": "Argo Rollouts releases gradually; use rolling, canary or blue-green"
+      },
+      "adapter_built": false
+    }
+  },
+  "deploy_role_profiles": {
+    "lambda-web:pipeline": "lambda-alias",
+    "lambda-web:codedeploy": "codedeploy-lambda",
+    "lambda-events:pipeline": "lambda-alias",
+    "lambda-events:codedeploy": "codedeploy-lambda",
+    "ecs-fargate:ecs-native": "ecs-native",
+    "ecs-fargate:codedeploy": "codedeploy-ecs",
+    "ecs-fargate:pipeline": "ecs-service-update",
+    "ec2-asg:asg": "asg-instance-refresh",
+    "ec2-asg:codedeploy": "codedeploy-ec2",
+    "eks-workload:argo-rollouts": "argo-rollouts"
+  }
+}

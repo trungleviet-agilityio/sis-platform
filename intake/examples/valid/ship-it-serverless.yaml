@@ -1,0 +1,24 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/trungleviet-agilityio/sis-platform/v0.1.0/intake/schema/platform.schema.json
+# Lambda Web Function lab (ship-it-serverless). The lab keeps x86_64.
+schema_version: 1
+project: {name: ship-it-serverless, prefix: sis}
+platform: {version: v0.1.0}
+workload: {shape: web, port: 8080, health_path: /health, max_duration_seconds: 10, max_payload_mb: 1}
+runtime: {kind: lambda-web, arch: x86_64, front_door: http-api}
+ci: {provider: github-actions}
+budget: {monthly_usd: 20}
+dr: {strategy: backup-restore, rto_minutes: 240, rpo_minutes: 1440}
+database: {kind: none}
+envs:
+  dev:
+    account: dev
+    region: ap-southeast-1
+    delivery: push
+    scale_to_zero: true
+    release: {strategy: canary, steps: [10, 100], bake_minutes: 5, rollback: alarm, engine: pipeline}
+  prod:
+    account: prod
+    region: ap-southeast-1
+    delivery: push
+    promote_from: dev
+    release: {strategy: all-at-once, rollback: manual, engine: auto}

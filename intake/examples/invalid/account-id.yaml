@@ -1,0 +1,8 @@
+# expect: V10
+schema_version: 1
+project: {name: demo-app, prefix: demo}
+platform: {version: v0.1.0}
+workload: {shape: web, health_path: /health/123456789012}
+runtime: {kind: lambda-web}
+envs:
+  dev: {account: dev, region: ap-southeast-1}
