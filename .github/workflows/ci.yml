@@ -1,0 +1,113 @@
+# CI (ADR 0001 Z9). No secrets, no OIDC token, no environments: it also runs for fork and Dependabot PRs.
+# harden-runner stays in `audit`: there are no credentials in Phase 0 (`block` from Phase 1 on credentialed jobs).
+# The ruleset requires the job named exactly `check`; it aggregates the others.
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
+        with:
+          egress-policy: audit
+
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.13"
+
+      - name: Install actionlint (checksum verified)
+        run: |
+          scripts/ci/install-actionlint.sh "$RUNNER_TEMP/bin"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+
+      # shellcheck is preinstalled on ubuntu-24.04. make lint builds the hash-locked venv, then runs
+      # pre-commit (gitleaks, zizmor, ruff, mypy, check-jsonschema, no-aws-account-id), shellcheck,
+      # the repo guard self-tests and actionlint.
+      - name: Lint
+        run: make lint
+
+  test:
+    name: test (python ${{ matrix.python }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.9 is the intake runtime floor (ADR 0001 Z3); setup-python serves it on ubuntu-24.04.
+        python: ["3.13", "3.9"]
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
+        with:
+          egress-policy: audit
+
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python ${{ matrix.python }}
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: ${{ matrix.python }}
+
+      # PyYAML is test-only; the YAML conformance test must run in CI, not be skipped.
+      - name: Install PyYAML (hash locked)
+        run: python -m pip install --quiet --require-hashes -r scripts/ci/requirements-test.txt
+
+      - name: Unit tests
+        run: make test
+
+      - name: Validate examples
+        run: make validate-examples
+
+  # The one status the ruleset requires. It fails when any needed job failed, was cancelled or was skipped.
+  check:
+    name: check
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    if: ${{ always() }}
+    needs: [lint, test]
+    permissions: {}
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
+        with:
+          egress-policy: audit
+
+      - name: Require every job to have succeeded
+        env:
+          NEEDS_RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          for r in $NEEDS_RESULTS; do
+            if [ "$r" != "success" ]; then
+              echo "::error::a required job finished with '$r'"
+              exit 1
+            fi
+          done
+          echo "all required jobs succeeded"

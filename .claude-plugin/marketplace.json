@@ -1,0 +1,14 @@
+{
+  "name": "sis-platform",
+  "description": "Plugins from the sis-platform delivery platform",
+  "owner": {
+    "name": "trungleviet-agilityio"
+  },
+  "plugins": [
+    {
+      "name": "sis-intake",
+      "source": "./intake",
+      "description": "Intake interview that turns a product idea into a validated platform.yaml manifest"
+    }
+  ]
+}

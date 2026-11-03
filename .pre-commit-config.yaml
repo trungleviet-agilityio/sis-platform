@@ -1,0 +1,63 @@
+# Revs are pinned to full commit SHAs; the release tag is in the `frozen` comment.
+repos:
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: 83d9cd684c87d95d656c1458ef04895a7f1cbd8e # frozen: v8.30.1
+    hooks:
+      - id: gitleaks
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: 3e8a8703264a2f4a69428a0aa4dcb512790b2c8c # frozen: v6.0.0
+    hooks:
+      - id: check-yaml
+      - id: check-json
+      - id: end-of-file-fixer
+      - id: detect-private-key
+
+  # No AWS account ID in git. gitleaks does not look for them. The AWS doc example ID and repeated-digit
+  # placeholders are allowed. intake/examples/invalid/ holds the deliberate 12-digit ID for rule V10.
+  - repo: local
+    hooks:
+      - id: no-aws-account-id
+        name: no bare 12-digit AWS account ID
+        language: pygrep
+        # Alphanumeric boundaries: a digit run inside a 40-hex SHA pin is bounded by letters or digits.
+        entry: '(?<![0-9A-Za-z])(?!123456789012|111111111111|222222222222)[0-9]{12}(?![0-9A-Za-z])'
+        types: [text]
+        exclude: ^intake/examples/invalid/
+
+  # Workflow security audits (offline). The guard fixtures are deliberately bad workflows.
+  - repo: https://github.com/zizmorcore/zizmor-pre-commit
+    rev: 06a39750ec31860bb44f2acf67182c40016cd1e7 # frozen: v1.32.0
+    hooks:
+      - id: zizmor
+        exclude: ^scripts/ci/fixtures/
+
+  # Python gate (pyproject.toml holds the config).
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: 25bcf95026b96e2dd3c0aec3090c3d6ef6ca2e6c # frozen: v0.17.3
+    hooks:
+      - id: ruff-check
+        files: ^(intake/|scripts/).*\.py$
+      - id: ruff-format
+        files: ^(intake/|scripts/).*\.py$
+
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: ad26ebfa797fcb9b8f83275937c1c1d6e126719c # frozen: v2.4.1
+    hooks:
+      - id: mypy
+        # Check the files listed in pyproject.toml as one program, with its strict settings.
+        args: []
+        pass_filenames: false
+        files: ^(intake/.*\.py|pyproject\.toml)$
+        additional_dependencies: [types-PyYAML==6.0.12.20261103]
+
+  # Cross-check the schema with a real JSON Schema library (ADR 0001 Z4); the runtime never imports one.
+  - repo: https://github.com/python-jsonschema/check-jsonschema
+    rev: a76b92851fc9eede9f9bc4073eb55202f34eb0df # frozen: 0.39.0
+    hooks:
+      - id: check-metaschema
+        files: ^intake/schema/platform\.schema\.json$
+      - id: check-jsonschema
+        name: valid examples match the platform schema
+        files: ^intake/examples/valid/.*\.yaml$
+        args: [--schemafile, intake/schema/platform.schema.json]
