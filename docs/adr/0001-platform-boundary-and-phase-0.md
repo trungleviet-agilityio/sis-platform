@@ -15,7 +15,8 @@ is `modules/app-ecs`, `iam_ecs_boundary.tf`, `scripts/ecs`, the deploy step and 
 causes drift: the `gh api` guard gap (serverless ADR 0013) had to be fixed twice.
 
 `sis-platform` becomes the single core. It is public, versioned by tag and consumed by thin project repos. The
-next real consumer is English for Devs. This ADR fixes the boundary for every phase. It also fixes the exact
+only consumer while the platform is built is ship-it-serverless; English for Devs is the first new app, piloted
+only after the platform is complete (owner, 2026-11-03). This ADR fixes the boundary for every phase. It also fixes the exact
 scope of Phase 0, which has no AWS code, no Terraform and no credentials.
 
 Inherited rules: no account IDs or secrets in git (public repo); actions pinned by SHA; Claude never applies,
@@ -66,7 +67,7 @@ confirm at a checkpoint.
 | P11 | SCPs (later phase, `modules/org-baseline`, applied by the owner): deny regions outside the allowlist (global services exempt), deny `organizations:LeaveOrganization`, deny root user actions, deny stopping CloudTrail and GuardDuty, deny `iam:CreateAccessKey` and `iam:CreateUser` in workload OUs. GuardDuty and Security Hub get a delegated admin in the audit account |
 | P12 | Identities. Humans: IAM Identity Center permission sets (SEC02-BP04). CI: per-account OIDC roles (plan/apply/deploy) as in the labs (SEC02-BP02). No cross-account CI hub role: a hub role widens the blast radius of one trust mistake |
 | P13 | Promotion stays copy-by-digest from the dev ECR to the prod ECR, gated by a GitHub environment. The prod deploy role pulls from the dev repo through a repository policy. Rejected: ECR cross-account replication (F13), because it pushes every dev image to prod with no gate. It is allowed later for cross-region DR copies. A central artifact account is deferred until there are more than two envs or projects. Encryption is AES256 by default; a KMS CMK (key policy grant to the prod deploy role) only when the intake answer `compliance.kms_cmk` is true |
-| P14 | Phases: 0 contract (this ADR). 1 extract shared core (`account-bootstrap`, scripts, repo-guard, reusable plan and apply workflows, OIDC change O*, sis-team move B*). 2 `runtime-lambda-web` and its adapter; ship-it-serverless consumes them. 3 English for Devs intake and bootstrap. Later: `ecs-fargate`, `org-baseline`, `ec2-asg`, EKS |
+| P14 | Phases: 0 contract (this ADR). 1 extract shared core (`account-bootstrap`, scripts, repo-guard, reusable plan and apply workflows, OIDC change O*, sis-team move B*). 2 `runtime-lambda-web` and its adapter; ship-it-serverless consumes them. Later platform phases: `ecs-fargate`, `org-baseline`, `ec2-asg`, EKS, the copier template. English for Devs is not a platform phase: it is a pilot run after the platform is complete (intake, bootstrap, first deploy), and nothing is built for it before then |
 
 ### M. Manifest and release axes
 
@@ -261,14 +262,14 @@ Intake question groups (`questions.json`), each tagged with the pillars it serve
 
 ## Owner answers (2026-11-03)
 
-The owner accepted the ADR without answering the open questions. The orchestrator took the defaults below; the
+The owner accepted the ADR and answered Q3. For the other questions the orchestrator took the defaults below; the
 owner can change any of them in a later PR.
 
 | # | Default taken | Effect |
 |---|---|---|
 | Q1 | 40 USD per month | V06 threshold in `rules.json` |
 | Q2 | Not decided; nothing enabled | No user-scope plugin change. The repo deny list is the only guard until Phase 1 |
-| Q3 | Not decided | No effect on Phase 0 |
+| Q3 | Answered by the owner: no English for Devs work now; pilot it only after the platform is complete | P14 updated; no dry run against `v0.1.0` |
 | Q4 | arm64 is the default for new apps | `defaults.json`; the two lab examples keep `x86_64` |
 | Q5 | Free plan assumed | B5 stands (no auto-add) |
 
