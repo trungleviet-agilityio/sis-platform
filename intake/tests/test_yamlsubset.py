@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib
 import unittest
 from typing import Any
 
@@ -9,8 +10,9 @@ from sis_intake.yamlsubset import YamlError, parse
 
 from .helpers import EXAMPLES
 
+yaml: Any
 try:
-    import yaml  # type: ignore[import-untyped,unused-ignore]
+    yaml = importlib.import_module("yaml")
 except ImportError:  # pragma: no cover
     yaml = None
 
