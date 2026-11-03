@@ -1,6 +1,6 @@
 # ADR 0001: Platform boundary for all phases, and Phase 0 scope
 
-- Status: proposed
+- Status: accepted (owner, 2026-11-03)
 - Date: 2026-11-03
 - Deciders: owner (accepts), solution-architect (drafts)
 - Reference implementations: `ship-it-safely` (ECS Fargate, frozen by its ADR 0010 T8), `ship-it-serverless`
@@ -258,6 +258,19 @@ Intake question groups (`questions.json`), each tagged with the pillars it serve
 | Q3 | Should English for Devs run the intake in Phase 3 or earlier, as a dry run against `v0.1.0`? |
 | Q4 | Do you accept arm64 as the default for new apps (labs stay x86_64)? |
 | Q5 | GitHub plan: Free (1 auto-add) is assumed in B5; confirm |
+
+## Owner answers (2026-11-03)
+
+The owner accepted the ADR without answering the open questions. The orchestrator took the defaults below; the
+owner can change any of them in a later PR.
+
+| # | Default taken | Effect |
+|---|---|---|
+| Q1 | 40 USD per month | V06 threshold in `rules.json` |
+| Q2 | Not decided; nothing enabled | No user-scope plugin change. The repo deny list is the only guard until Phase 1 |
+| Q3 | Not decided | No effect on Phase 0 |
+| Q4 | arm64 is the default for new apps | `defaults.json`; the two lab examples keep `x86_64` |
+| Q5 | Free plan assumed | B5 stands (no auto-add) |
 
 ## Sources
 
