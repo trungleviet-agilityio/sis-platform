@@ -13,6 +13,10 @@ The phase plan and progress tracker are the maintainer's working notes, kept out
 
 - Work one phase at a time: ADR first (`proposed`, then `accepted` by the user), then build, verify, and stop at
   the checkpoint with the exact commands for the user.
+- Design at the level of an AWS Certified Solutions Architect Professional (SAP-C02). Every ADR has a
+  `## Well-Architected review` table covering the six pillars (operational excellence, security, reliability,
+  performance efficiency, cost optimization, sustainability), citing the pillar best practices it meets and the
+  gaps it leaves: https://docs.aws.amazon.com/wellarchitected/latest/framework/the-pillars-of-the-framework.html
 - Never add `PLAN.md`, `PROGRESS.md` or another copy of the working notes to the repo.
 - Never run `terraform apply`, `terraform destroy`, `terraform import`, `terraform state rm|mv|push`,
   `aws secretsmanager put-secret-value|get-secret-value`, `aws iam create-access-key`, `gh pr merge`,
@@ -35,6 +39,6 @@ Same roles as the `sis-team` plugin in `ship-it-safely`: `solution-architect` wr
 | Agent | Owns |
 |---|---|
 | `backend-dev` | `intake/**` (the manifest schema, validator and decision rules, Python) |
-| `devops-engineer` | `modules/**`, `adapters/**`, `.github/**`, `templates/**`, repo tooling (`Makefile`, `.pre-commit-config.yaml`, `scripts/**`) |
+| `devops-engineer` | `modules/**`, `adapters/**`, `.github/**`, `.claude-plugin/**`, `templates/**`, repo tooling (`Makefile`, `.pre-commit-config.yaml`, `pyproject.toml`, `mise.toml`, `scripts/**`) |
 
 The orchestrating session owns the repo `README.md`, `CLAUDE.md` and `docs/**`. Build agents never edit them.
