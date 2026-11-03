@@ -349,9 +349,10 @@ Done: `make check` green from a clean clone after `mise install`; actionlint and
 green on the PR; harden-runner in `audit` with its egress list recorded in the PR for Phase 1 `block`; no file
 outside the owned paths touched.
 
-## Amendment A (proposed, 2026-11-03): lessons from ship-it-serverless
+## Amendment A (2026-11-03): lessons from ship-it-serverless
 
-- Status: proposed (owner to accept)
+- Status: accepted (owner, 2026-11-03). The Phase 0 delta D1 to D7 is deferred: Phase 0 ships as built
+  (`v0.1.0`), and D1 to D7 land as the first PR of Phase 1. C1 to C4 are applied in Phase 0
 - Source: maintainer note `2026-11-03-ship-it-serverless-lessons-for-sis-platform.md` (a proposal from another
   session) and ship-it-serverless PR #6. P14 is unchanged: the platform is completed first; English for Devs is a
   pilot afterwards.
@@ -388,7 +389,7 @@ Not adopted:
 | AWS DevOps Agent (stage 2) as a platform default | Paid per agent-second against 20 USD budgets; opt-in per project |
 | Renaming the `sis-lab` marketplace in the labs | Changes `enabledPlugins` for everyone; moot after B3 step 5 |
 
-Phase 0 delta (backend-dev, `intake/**`):
+Intake delta, deferred to the first PR of Phase 1 (backend-dev, `intake/**`):
 
 | # | Change | Test |
 |---|---|---|
