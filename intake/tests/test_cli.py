@@ -74,6 +74,25 @@ class Cli(unittest.TestCase):
         data = json.loads(proc.stdout)
         self.assertEqual([f["id"] for f in data["findings"]], ["PARSE"])
 
+    def run_text(self, text: str, *args: str) -> subprocess.CompletedProcess[str]:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "m.yaml"
+            path.write_text(text, "utf-8")
+            return run_script(str(path), *args)
+
+    def test_schema_version_true_is_rejected(self) -> None:
+        base = (EXAMPLES / "valid" / "minimal.yaml").read_text("utf-8")
+        proc = self.run_text(base.replace("schema_version: 1", "schema_version: true"))
+        self.assertEqual(proc.returncode, 1, proc.stderr)
+        self.assertIn("SCHEMA", proc.stdout)
+
+    def test_huge_integer_and_deep_nesting_are_parse_errors(self) -> None:
+        for text in ("a: " + "9" * 5000 + "\n", "".join("  " * i + "k:\n" for i in range(400))):
+            with self.subTest(size=len(text)):
+                proc = self.run_text(text, "--json")
+                self.assertEqual(proc.returncode, 2, proc.stderr[-300:])
+                self.assertEqual([f["id"] for f in json.loads(proc.stdout)["findings"]], ["PARSE"])
+
     def test_module_invocation(self) -> None:
         proc = subprocess.run(
             [sys.executable, "-m", "sis_intake.validate", str(EXAMPLES / "valid" / "minimal.yaml")],

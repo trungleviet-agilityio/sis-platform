@@ -137,6 +137,26 @@ class ParseRejects(unittest.TestCase):
     def test_missing_colon(self) -> None:
         self.assertEqual(error_line("a: 1\njust text\n"), 2)
 
+    def test_rejected_plain_scalars(self) -> None:
+        for bad in ("-", "- x", "=", "<<", "?", "? x", "x\ty"):
+            with self.subTest(bad=bad):
+                self.assertEqual(error_line(f"a: {bad}\n"), 1)
+
+    def test_huge_integer(self) -> None:
+        self.assertEqual(error_line("a: {}\n".format("9" * 5000)), 1)
+        self.assertEqual(parse("a: {}\n".format("9" * 18)), {"a": int("9" * 18)})
+        self.assertEqual(error_line("a: {}\n".format("9" * 19)), 1)
+
+    def test_depth_cap(self) -> None:
+        def nested(levels: int) -> str:
+            lines = ["{}k:".format("  " * i) for i in range(levels - 1)]
+            lines.append("{}k: 1".format("  " * (levels - 1)))
+            return "\n".join(lines) + "\n"
+
+        self.assertIsInstance(parse(nested(32)), dict)
+        self.assertEqual(error_line(nested(33)), 33)
+        error_line(nested(200))
+
     def test_error_message_has_line(self) -> None:
         with self.assertRaises(YamlError) as ctx:
             parse("a: 1\nb: &x 2\n")
@@ -160,6 +180,7 @@ class Conformance(unittest.TestCase):
             "l:\n  - a: 1\n    b: 2\n  - c\n  - 'd: e'\n",
             "q: \"a\\nb\"\nr: 'it''s'\ns: ''\n",
             "t: true\nf: false\nn: null\nz: ~\ni: -5\n",
+            "a: -x\nb: x - y\nc: <<x\n",
         ]
         for text in snippets:
             with self.subTest(text=text):

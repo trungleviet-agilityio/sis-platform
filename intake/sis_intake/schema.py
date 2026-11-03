@@ -79,6 +79,18 @@ def _type_name(value: Any) -> str:
     return type(value).__name__
 
 
+def _same(a: Any, b: Any) -> bool:
+    """JSON equality: True is not 1."""
+    return isinstance(a, bool) == isinstance(b, bool) and a == b
+
+
+def _pattern_search(pattern: str, value: str) -> re.Match[str] | None:
+    # ECMA 262 `$` matches only at the very end; Python's also matches before a final newline.
+    if pattern.endswith("$") and not pattern.endswith("\\$"):
+        pattern = pattern[:-1] + r"\Z"
+    return re.search(pattern, value)
+
+
 def _join(path: str, key: str) -> str:
     return path + "." + key if path else key
 
@@ -103,14 +115,14 @@ def _check(
             SchemaIssue(path, "expected {}, got {}".format(schema["type"], _type_name(value)))
         )
         return
-    if "enum" in schema and value not in schema["enum"]:
+    if "enum" in schema and not any(_same(value, option) for option in schema["enum"]):
         out.append(SchemaIssue(path, "must be one of {}, got {!r}".format(schema["enum"], value)))
-    if "const" in schema and value != schema["const"]:
+    if "const" in schema and not _same(value, schema["const"]):
         out.append(SchemaIssue(path, "must be {!r}, got {!r}".format(schema["const"], value)))
     if (
         isinstance(value, str)
         and "pattern" in schema
-        and re.search(schema["pattern"], value) is None
+        and _pattern_search(schema["pattern"], value) is None
     ):
         out.append(
             SchemaIssue(path, "{!r} does not match pattern {}".format(value, schema["pattern"]))

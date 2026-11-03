@@ -43,6 +43,8 @@ _NUMBER_LIKE = [
     re.compile(r"^\d{4}-\d{1,2}-\d{1,2}"),
     re.compile(r"^[-+]?\.(inf|Inf|INF|nan|NaN|NAN)$"),
 ]
+_MAX_DEPTH = 32
+_MAX_INT_DIGITS = 18
 _AMBIGUOUS_BOOLS = {"yes", "no", "on", "off", "y", "n"}
 _ESCAPES = {"\\": "\\", '"': '"', "n": "\n", "t": "\t", "/": "/"}
 
@@ -142,6 +144,8 @@ def _resolve_plain(text: str, no: int) -> Any:
     if text.lower() in _AMBIGUOUS_BOOLS:
         raise YamlError(no, f"ambiguous boolean {text!r}: write true or false, or quote the string")
     if _INT.match(text):
+        if len(text.lstrip("+-")) > _MAX_INT_DIGITS:
+            raise YamlError(no, f"integer has more than {_MAX_INT_DIGITS} digits: quote it")
         return int(text)
     for pattern in _NUMBER_LIKE:
         if pattern.match(text):
@@ -166,6 +170,8 @@ def _scalar(text: str, no: int) -> Any:
         if text[end:].strip():
             raise YamlError(no, "unexpected text after quoted string")
         return value
+    if text in ("-", "=", "<<", "?") or text.startswith(("- ", "? ")) or "\t" in text:
+        raise YamlError(no, "plain scalar not accepted by YAML parsers: quote it")
     if re.search(r":(\s|$)", text):
         raise YamlError(no, "nested mapping on one line is not supported")
     return _resolve_plain(text, no)
@@ -258,6 +264,12 @@ class _Parser:
     def __init__(self, lines: list[_Line]) -> None:
         self.lines = lines
         self.pos = 0
+        self.depth = 0
+
+    def _enter(self, no: int) -> None:
+        self.depth += 1
+        if self.depth > _MAX_DEPTH:
+            raise YamlError(no, f"nesting deeper than {_MAX_DEPTH} levels")
 
     def _nested(self, indent: int) -> Any:
         if self.pos < len(self.lines) and self.lines[self.pos].indent > indent:
@@ -280,6 +292,12 @@ class _Parser:
         return self.map_(indent)
 
     def map_(self, indent: int) -> dict[str, Any]:
+        self._enter(self.lines[self.pos].no)
+        result = self._map(indent)
+        self.depth -= 1
+        return result
+
+    def _map(self, indent: int) -> dict[str, Any]:
         result: dict[str, Any] = {}
         while self.pos < len(self.lines) and self.lines[self.pos].indent == indent:
             line = self.lines[self.pos]
@@ -302,6 +320,12 @@ class _Parser:
         return result
 
     def list_(self, indent: int) -> list[Any]:
+        self._enter(self.lines[self.pos].no)
+        result = self._list(indent)
+        self.depth -= 1
+        return result
+
+    def _list(self, indent: int) -> list[Any]:
         result: list[Any] = []
         while (
             self.pos < len(self.lines)

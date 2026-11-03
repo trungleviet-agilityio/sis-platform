@@ -42,6 +42,18 @@ class Keywords(unittest.TestCase):
         self.assertEqual(schema.validate(1, sch), [])
         self.assertEqual(len(schema.validate(2, sch)), 1)
 
+    def test_const_and_enum_distinguish_bool_from_int(self) -> None:
+        self.assertEqual(len(schema.validate(True, {"const": 1})), 1)
+        self.assertEqual(len(schema.validate(1.0, {"const": True})), 1)
+        self.assertEqual(len(schema.validate(True, {"enum": [0, 1]})), 1)
+        self.assertEqual(schema.validate(1, {"enum": [0, 1]}), [])
+        self.assertEqual(schema.validate(True, {"const": True}), [])
+
+    def test_pattern_rejects_trailing_newline(self) -> None:
+        sch = {"type": "string", "pattern": "^[a-z]+$"}
+        self.assertEqual(schema.validate("abc", sch), [])
+        self.assertEqual(len(schema.validate("abc\n", sch)), 1)
+
     def test_required(self) -> None:
         sch = {"type": "object", "required": ["a"]}
         self.assertEqual(schema.validate({"a": 1}, sch), [])
