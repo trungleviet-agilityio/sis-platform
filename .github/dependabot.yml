@@ -1,0 +1,46 @@
+# Version updates: one weekly PR per ecosystem, with a cooldown so a bad release can be pulled before it is
+# proposed (security updates ignore the cooldown). Commit titles read `<prefix>(deps): ...`.
+# Not covered: the tool versions in mise.toml (manual check). Keep the pre-commit entry only while its PRs
+# preserve the `# frozen: vX` comments.
+version: 2
+
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: ci
+      include: scope
+    groups:
+      actions:
+        patterns: ["*"]
+
+  # scripts/ci/requirements.txt (uv-compiled, hash-locked; requirements.in holds the direct pins).
+  - package-ecosystem: pip
+    directory: /scripts/ci
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: build
+      include: scope
+    groups:
+      ci-python:
+        patterns: ["*"]
+
+  - package-ecosystem: pre-commit
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: chore
+      include: scope
+    groups:
+      hooks:
+        patterns: ["*"]

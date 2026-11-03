@@ -1,0 +1,9 @@
+# Project CLI tools, pinned to exact versions. `mise install` from the repo root installs them.
+# Bump a version here in its own `chore(repo)` commit and run `make check`.
+[tools]
+python = "3.13"
+pre-commit = "4.7.0"
+actionlint = "1.7.12"
+shellcheck = "0.11.0"
+gitleaks = "8.30.1"
+uv = "0.13.7"
