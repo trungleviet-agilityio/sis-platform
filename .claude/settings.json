@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "deny": [
+      "Bash(terraform apply *)",
+      "Bash(terraform destroy *)",
+      "Bash(terraform import *)",
+      "Bash(terraform state rm *)",
+      "Bash(terraform state mv *)",
+      "Bash(terraform state push *)",
+      "Bash(terraform force-unlock *)",
+      "Bash(aws secretsmanager put-secret-value *)",
+      "Bash(aws secretsmanager get-secret-value *)",
+      "Bash(aws iam create-access-key *)",
+      "Bash(gh secret set *)",
+      "Bash(gh variable set *)",
+      "Bash(gh pr merge *)",
+      "Bash(gh workflow run *)",
+      "Bash(git push --force *)",
+      "Bash(git push -f *)",
+      "Read(./**/*.tfstate)",
+      "Read(./**/*.tfstate.backup)",
+      "Read(./**/*.tfvars)",
+      "Read(./**/.terraform/**)"
+    ]
+  }
+}

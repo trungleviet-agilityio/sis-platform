@@ -1,0 +1,31 @@
+.env
+.env.*
+!.env.example
+__pycache__/
+*.pyc
+.venv/
+.ruff_cache/
+.mypy_cache/
+
+# Terraform: state, plans and account-specific inputs never enter git
+.terraform/
+.terraform-*/
+*.tfstate
+*.tfstate.*
+*.tfplan
+tfplan
+*.tfplan.json
+*.tfvars
+*.tfvars.json
+!**/*.tfvars.example
+*.tfbackend
+!*.tfbackend.example
+
+# Working notes stay outside the repo
+PLAN.md
+PROGRESS.md
+
+# Claude Code personal files
+.claude/settings.local.json
+CLAUDE.local.md
+.DS_Store
