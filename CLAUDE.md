@@ -17,7 +17,8 @@ rules in `.claude/rules/` load with the files they cover.
   with the exact commands for the owner.
 - Autopilot offline (owner, 2026-11-03), when the owner asks for it: several phases are drafted, cross-reviewed,
   built and verified on a stack of local branches (`phase-<n>-<slug>`, each cut from the previous one) before the
-  owner accepts them. ADRs stay `proposed`. Nothing is merged, pushed or applied, and nothing touches AWS. Every
+  owner accepts them. ADRs stay `proposed`. Each ADR gets its own docs PR (`docs/adr-NNNN-<slug>`, base `main`)
+  and each phase build gets a PR stacked on its ADR PR. Nothing is merged or applied, and nothing touches AWS. Every
   ADR gets a challenger review and every build sub-ticket an independent peer review before the verify agents.
   The owner accepts the whole stack at the end.
 - Push feature branches and open PRs. Never merge, run or rerun a workflow, approve a deployment, write through
