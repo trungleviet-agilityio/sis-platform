@@ -6,8 +6,10 @@ in `platform.yaml`; the intake interview turns a product idea into that manifest
 `0001-*.md` first). Reference labs: `ship-it-safely` (ECS, frozen) and `ship-it-serverless` (Lambda). Working
 notes stay outside the repo.
 
-Hard limits are enforced by the deny rules in `.claude/settings.json` (and the sis-team guard from Phase 1), not
-by this file. Path rules in `.claude/rules/` load with the files they cover.
+Hard limits are backed by the deny rules in `.claude/settings.json` and, server side, by the `main` branch
+ruleset; the sis-team guard joins them in Phase 1. The deny rules are globs with known gaps (other spellings of
+`git push` to `main`, `gh api` writes, reading secret files through `cat`), accepted until that guard lands. Path
+rules in `.claude/rules/` load with the files they cover.
 
 ## Rules
 
