@@ -410,3 +410,11 @@ main`, reads of `.env`, `*.tfplan`, `*.auto.tfvars`, `*.tfvars.json`, `*.tfbacke
 skill keeps model invocation; from Phase 1 every side-effect skill gets `disable-model-invocation: true`.
 
 Defaults if accepted: V19 also applies in dev; `aws-ops` comes after the first live lambda-web checkpoint.
+
+Verify notes (2026-11-03, Phase 0):
+
+- The M example above is illustrative. The loader (Z5) rejects a flow map inside a flow map and a flow collection
+  spread over lines; `intake/examples/valid/ship-it-serverless.yaml` is the loadable form of the same manifest.
+- Z9 is met by an aggregator: CI jobs `lint` and `test` run the `make` targets, and the job `check` needs both and
+  fails unless both succeed. `check` itself does not call `make check`.
+- V11, V16 and V18 match the env named `prod` only, as written. An `is_prod` flag is a Phase 1 candidate.
