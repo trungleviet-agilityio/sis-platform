@@ -15,7 +15,8 @@ is `modules/app-ecs`, `iam_ecs_boundary.tf`, `scripts/ecs`, the deploy step and 
 causes drift: the `gh api` guard gap (serverless ADR 0013) had to be fixed twice.
 
 `sis-platform` becomes the single core. It is public, versioned by tag and consumed by thin project repos. The
-next real consumer is English for Devs. This ADR fixes the boundary for every phase. It also fixes the exact
+only consumer while the platform is built is ship-it-serverless; English for Devs is the first new app, piloted
+only after the platform is complete (owner, 2026-11-03). This ADR fixes the boundary for every phase. It also fixes the exact
 scope of Phase 0, which has no AWS code, no Terraform and no credentials.
 
 Inherited rules: no account IDs or secrets in git (public repo); actions pinned by SHA; Claude never applies,
@@ -66,7 +67,7 @@ confirm at a checkpoint.
 | P11 | SCPs (later phase, `modules/org-baseline`, applied by the owner): deny regions outside the allowlist (global services exempt), deny `organizations:LeaveOrganization`, deny root user actions, deny stopping CloudTrail and GuardDuty, deny `iam:CreateAccessKey` and `iam:CreateUser` in workload OUs. GuardDuty and Security Hub get a delegated admin in the audit account |
 | P12 | Identities. Humans: IAM Identity Center permission sets (SEC02-BP04). CI: per-account OIDC roles (plan/apply/deploy) as in the labs (SEC02-BP02). No cross-account CI hub role: a hub role widens the blast radius of one trust mistake |
 | P13 | Promotion stays copy-by-digest from the dev ECR to the prod ECR, gated by a GitHub environment. The prod deploy role pulls from the dev repo through a repository policy. Rejected: ECR cross-account replication (F13), because it pushes every dev image to prod with no gate. It is allowed later for cross-region DR copies. A central artifact account is deferred until there are more than two envs or projects. Encryption is AES256 by default; a KMS CMK (key policy grant to the prod deploy role) only when the intake answer `compliance.kms_cmk` is true |
-| P14 | Phases: 0 contract (this ADR). 1 extract shared core (`account-bootstrap`, scripts, repo-guard, reusable plan and apply workflows, OIDC change O*, sis-team move B*). 2 `runtime-lambda-web` and its adapter; ship-it-serverless consumes them. 3 English for Devs intake and bootstrap. Later: `ecs-fargate`, `org-baseline`, `ec2-asg`, EKS |
+| P14 | Phases: 0 contract (this ADR). 1 extract shared core (`account-bootstrap`, scripts, repo-guard, reusable plan and apply workflows, OIDC change O*, sis-team move B*). 2 `runtime-lambda-web` and its adapter; ship-it-serverless consumes them. Later platform phases: `ecs-fargate`, `org-baseline`, `ec2-asg`, EKS, the copier template. English for Devs is not a platform phase: it is a pilot run after the platform is complete (intake, bootstrap, first deploy), and nothing is built for it before then |
 
 ### M. Manifest and release axes
 
@@ -261,14 +262,14 @@ Intake question groups (`questions.json`), each tagged with the pillars it serve
 
 ## Owner answers (2026-11-03)
 
-The owner accepted the ADR without answering the open questions. The orchestrator took the defaults below; the
+The owner accepted the ADR and answered Q3. For the other questions the orchestrator took the defaults below; the
 owner can change any of them in a later PR.
 
 | # | Default taken | Effect |
 |---|---|---|
 | Q1 | 40 USD per month | V06 threshold in `rules.json` |
 | Q2 | Not decided; nothing enabled | No user-scope plugin change. The repo deny list is the only guard until Phase 1 |
-| Q3 | Not decided | No effect on Phase 0 |
+| Q3 | Answered by the owner: no English for Devs work now; pilot it only after the platform is complete | P14 updated; no dry run against `v0.1.0` |
 | Q4 | arm64 is the default for new apps | `defaults.json`; the two lab examples keep `x86_64` |
 | Q5 | Free plan assumed | B5 stands (no auto-add) |
 
@@ -347,3 +348,73 @@ Makefile target name contains `apply` or `destroy`. Wire it into `make lint`.
 Done: `make check` green from a clean clone after `mise install`; actionlint and zizmor clean; the CI `check` job
 green on the PR; harden-runner in `audit` with its egress list recorded in the PR for Phase 1 `block`; no file
 outside the owned paths touched.
+
+## Amendment A (2026-11-03): lessons from ship-it-serverless
+
+- Status: accepted (owner, 2026-11-03). The Phase 0 delta D1 to D7 is deferred: Phase 0 ships as built
+  (`v0.1.0`), and D1 to D7 land as the first PR of Phase 1. C1 to C4 are applied in Phase 0
+- Source: maintainer note `2026-11-03-ship-it-serverless-lessons-for-sis-platform.md` (a proposal from another
+  session) and ship-it-serverless PR #6. P14 is unchanged: the platform is completed first; English for Devs is a
+  pilot afterwards.
+
+| # | Lesson accepted | Amends | Lands in | Pillars |
+|---|---|---|---|---|
+| A1 | Release by version: publish the new version or revision by digest, verify **that** version before it gets traffic (smoke-invoke on Lambda, test listener on ECS blue/green, health gate where nothing else exists), then shift traffic. Rollback reuses an existing version whose metadata names the digest: no push, no publish | P4 | Phase 2 (lambda-web), then every adapter | OPS (OPS06-BP02), REL (REL08-BP02) |
+| A2 | Adapter inputs add `PREFIX` and `STRATEGY` (resolved from `platform.yaml`). The output JSON line adds `live_version` and `endpoint` | P4 | Phase 2 | OPS |
+| A3 | A canary is judged on per-route synthetic probes **and** the runtime error metric. On Lambda, `Errors` misses app HTTP 5xx behind the Web Adapter | M2, V01 wording, new V19 | Phase 0 (contract), Phase 2 (bake logic) | REL, OPS (OPS06-BP04) |
+| A4 | Terraform owns the shape; the deploy owns image, digest, description, alias version and weights. Each runtime module's tftest asserts its `ignore_changes` list | P5 | Phase 2 | OPS, REL (REL08-BP04) |
+| A5 | ECR is one repository per account, in `account-bootstrap`. New-env order: first image push, then apply, then the secret value, then a release of a known-green SHA | P1, P13 | Phase 1 (module), Phase 2 (checkpoint order) | REL, SEC |
+| A6 | An IAM policy library per runtime in `account-bootstrap`, one tftest assertion per statement: ECR pull for the caller of image functions; `lambda:AddPermission` conditioned on `lambda:Principal`; exact `aws:sourceArn` (`function:<fn>` and `function:<fn>:*`, never `<fn>*`); `PassRole` only with `iam:PassedToService` | P1 | Phase 1 (shared), Phase 2 (lambda) | SEC (SEC02-BP02) |
+| A7 | Every first apply of a new role or module ends with a CloudTrail AccessDenied check, because mock providers cannot find missing read actions | Consequences (checkpoint template) | Phase 1 onward | SEC, OPS |
+| A8 | Secrets per runtime: the app reads secrets only from the runtime path and ignores a plain env override; the secret read is conditioned on the calling function (`lambda:SourceFunctionArn`). Each runtime ADR carries a "who can reach the secret" table. "Deploy can run code as the execution role" is an accepted risk | App contract, P5 | Phase 2 | SEC (SEC02-BP03) |
+| A9 | Credentialed jobs allow exact egress hosts only, no wildcard family such as `*.execute-api`; probes go through the Lambda API. `harden_runner_policy.py` becomes a platform check | O7 | Phase 1 | SEC (SEC11-BP07) |
+| A10 | lambda-web sets HTTP API stage throttling by default as the hard cost ceiling, independent of the account concurrency quota | Table D | Phase 2 | COST (COST02-BP05), REL |
+| A11 | Low-budget defaults: lambda-web with HTTP API; dev `all-at-once`; prod `canary` with probes. ECS only for requests over 15 min, WebSockets or steady load | Table D, V08 | Phase 0 (data), Phase 2 (module) | COST, PERF (PERF01) |
+| A12 | `scripts/github/check-settings.sh`, read-only `gh api`: visibility, ruleset target and rules, required check, environment reviewers, `main`-only branch policy. Every consumer runs it at bootstrap | Consequences | Phase 1 | SEC, OPS |
+| A13 | Base images on registries Dependabot cannot read (`public.ecr.aws`) are bumped by hand monthly through the `pin-versions` skill | B1 | Phase 1 | SEC (SEC11-BP05) |
+| A14 | Guard scope: allow `git push` of feature branches and `gh pr create\|comment\|view`. Block merge, workflow run/enable/disable, run rerun, secrets, variables, `gh api` writes (including `pending_deployments`) and pushes to `main` | B8 | Phase 1 (guard move) | SEC, OPS |
+| A15 | Skills are per workflow. A runtime prefix only where behavior differs (`lambda-release-check`); shared ones unprefixed (`cost-check`). All in the Agent Skills format | B1 | Phase 1 (naming) | OPS |
+| A16 | Read-only `aws-ops` agent (stage 1), built after the first live lambda-web checkpoint | P14 (new later phase "ops layer") | After Phase 2 | OPS (OPS04) |
+| A17 | ADR format: facts marked (V)/(S)/(C); an options table with pros and cons per decision; accepted risks written as "accepted", never "cannot happen" | CLAUDE.md | Now | OPS |
+| A18 | A build agent's last commit is never a WIP checkpoint; its report carries an item table (fixed, accepted risk, not reproducible). Shell scripts stay bash 3.2 compatible (macOS `/bin/bash`) | CLAUDE.md working model, `.claude/rules/scripts.md` | Now | OPS |
+
+Not adopted:
+
+| Proposal | Reason |
+|---|---|
+| A separate `docs/tradeoffs.md` per project | Two places for one decision; the options table lives in the ADR (A17) |
+| Extract only when a second consumer exists | P14 (owner): the platform is completed first, the pilot comes after |
+| Validator rule "no plaintext secret in function env" | `platform.yaml` carries no env values; enforced in runtime module tftest (A8) |
+| Validator rule "refuse `*` resources" | A Terraform concern: Phase 1 policy check on `modules/**` |
+| AWS DevOps Agent (stage 2) as a platform default | Paid per agent-second against 20 USD budgets; opt-in per project |
+| Renaming the `sis-lab` marketplace in the labs | Changes `enabledPlugins` for everyone; moot after B3 step 5 |
+
+Intake delta, deferred to the first PR of Phase 1 (backend-dev, `intake/**`):
+
+| # | Change | Test |
+|---|---|---|
+| D1 | Optional `envs.<env>.release.probes`: array of strings, `minItems: 1`, pattern `^/[A-Za-z0-9._~/-]*$` | `["/health","/version"]` passes; `[]` and `["health"]` fail |
+| D2 | New V19 (E): `canary` or `linear` needs `release.probes` with at least one path other than `workload.health_path`. REL, OPS; OPS06-BP04, OPS04-BP02 | Pass and fail cases; `invalid/canary-no-probes.yaml` with `# expect: V19`; catalog 1:1 |
+| D3 | V01 message: "canary or linear requires automated rollback (`rollback: alarm`: alarms, or metric plus probe judgment)" | Existing V01 tests green |
+| D4 | `workload.needs` gains `websockets`; V08 fires for lambda-web with `websockets` | Fail on lambda-web, pass on ecs-fargate |
+| D5 | `defaults.json` per env tier: dev `all-at-once`, rollback `manual`; prod `canary`, steps `[10, 100]`, `bake_minutes: 5`, rollback `alarm`, probes `[<health_path>, "/version"]`; lambda-web front door `http-api` | `minimal.yaml` with defaults applied has 0 errors |
+| D6 | Q5 asks for probe paths; Q2 asks about WebSockets or long-lived connections | Every question has pillars |
+| D7 | `valid/ship-it-serverless.yaml` dev canary gets `probes: [/health, /version]` | 0 errors |
+
+Claude setup delta (orchestrator): C1 shorten `CLAUDE.md` (about 60 lines), state that hard limits live in
+`.claude/settings.json` and path rules in `.claude/rules/`, add the push/PR rule, A17 and A18; C2 path-scoped
+`.claude/rules/` (`intake.md`, `ci-cd.md`, `scripts.md`, `adr.md`; `terraform.md` in Phase 1); C3 deny additions for
+parity with serverless ADR 0013 G5 (`gh run rerun`, `gh repo edit`, `gh auth token|refresh`, `git push origin
+main`, reads of `.env`, `*.tfplan`, `*.auto.tfvars`, `*.tfvars.json`, `*.tfbackend`, `~/.aws/**`, `~/.ssh/**`);
+`gh api` writes cannot be denied reliably by glob, so that risk stays open until the Phase 1 guard; C4 the intake
+skill keeps model invocation; from Phase 1 every side-effect skill gets `disable-model-invocation: true`.
+
+Defaults if accepted: V19 also applies in dev; `aws-ops` comes after the first live lambda-web checkpoint.
+
+Verify notes (2026-11-03, Phase 0):
+
+- The M example above is illustrative. The loader (Z5) rejects a flow map inside a flow map and a flow collection
+  spread over lines; `intake/examples/valid/ship-it-serverless.yaml` is the loadable form of the same manifest.
+- Z9 is met by an aggregator: CI jobs `lint` and `test` run the `make` targets, and the job `check` needs both and
+  fails unless both succeed. `check` itself does not call `make check`.
+- V11, V16 and V18 match the env named `prod` only, as written. An `is_prod` flag is a Phase 1 candidate.
