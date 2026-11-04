@@ -1,0 +1,441 @@
+"""Tests for scripts/platform/check_lock.py (ADR 0002, L1, L3, C1). Standard library plus PyYAML,
+Python 3.9 or later. Every case builds local fixture git repos; nothing touches the network.
+
+    python3 -m unittest discover -s scripts/release/tests
+"""
+
+from __future__ import annotations
+
+import json
+import shutil
+import subprocess  # noqa: S404  (one end-to-end exit-code check)
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+from typing import List, Optional
+
+import helpers
+from helpers import PLATFORM, REPO_ROOT, Repo, consumer, run_main
+
+# isort: split
+import check_lock  # noqa: E402  (sys.path is set by helpers)
+
+A = "a" * 40
+B = "b" * 40
+
+
+class OfflineCase(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.root = consumer(self.tmp / "consumer", "v0.2.0", A, B)
+
+    def run_check(self, *extra: str) -> tuple[int, str]:
+        rc, _out, err = run_main(check_lock, [str(self.root), *extra])
+        return rc, err
+
+    def expect_ok(self) -> None:
+        rc, err = self.run_check()
+        self.assertEqual((rc, err), (0, ""))
+
+    def expect_fail(self, fragment: str) -> None:
+        rc, err = self.run_check()
+        self.assertEqual(rc, 1, err)
+        self.assertIn(fragment, err)
+
+    def edit_lock(self, **changes: object) -> None:
+        path = self.root / "platform.lock"
+        doc = json.loads(path.read_text(encoding="utf-8"))
+        for key, value in changes.items():
+            if value is None:
+                doc.pop(key, None)
+            else:
+                doc[key] = value
+        path.write_text(json.dumps(doc), encoding="utf-8")
+
+    def edit(self, rel: str, old: str, new: str) -> None:
+        path = self.root / rel
+        text = path.read_text(encoding="utf-8")
+        self.assertIn(old, text)
+        path.write_text(text.replace(old, new), encoding="utf-8")
+
+
+class LockSchema(OfflineCase):
+    def test_a_good_consumer_passes(self) -> None:
+        self.expect_ok()
+
+    def test_missing_lock(self) -> None:
+        (self.root / "platform.lock").unlink()
+        self.expect_fail("platform.lock: cannot read")
+
+    def test_lock_that_is_not_json(self) -> None:
+        (self.root / "platform.lock").write_text("version = 1\n", encoding="utf-8")
+        self.expect_fail("platform.lock: not valid JSON")
+
+    def test_lock_that_is_not_an_object(self) -> None:
+        (self.root / "platform.lock").write_text("[]", encoding="utf-8")
+        self.expect_fail("platform.lock: must be a JSON object")
+
+    def test_missing_key(self) -> None:
+        self.edit_lock(workflow_sha=None)
+        self.expect_fail("platform.lock: missing key 'workflow_sha'")
+
+    def test_unknown_key(self) -> None:
+        self.edit_lock(previous_workflow_sha=A)
+        self.expect_fail("platform.lock: unknown key 'previous_workflow_sha'")
+
+    def test_lock_version(self) -> None:
+        self.edit_lock(lock_version=2)
+        self.expect_fail("platform.lock: lock_version must be 1")
+
+    def test_lock_version_true_is_not_one(self) -> None:
+        self.edit_lock(lock_version=True)
+        self.expect_fail("platform.lock: lock_version must be 1")
+
+    def test_version_shape(self) -> None:
+        self.edit_lock(version="0.2.0")
+        self.expect_fail("platform.lock: version must look like vX.Y.Z")
+
+    def test_release_sha_shape(self) -> None:
+        self.edit_lock(release_sha="v0.2.0")
+        self.expect_fail("platform.lock: release_sha must be 40 lowercase hex characters")
+
+    def test_workflow_sha_shape(self) -> None:
+        self.edit_lock(workflow_sha=B.upper(), trusted_workflow_shas=[B])
+        self.expect_fail("platform.lock: workflow_sha must be 40 lowercase hex characters")
+
+    def test_trusted_list_empty(self) -> None:
+        self.edit_lock(trusted_workflow_shas=[])
+        self.expect_fail("platform.lock: trusted_workflow_shas must hold 1 or 2 values")
+
+    def test_trusted_list_too_long(self) -> None:
+        self.edit_lock(trusted_workflow_shas=[B, A, "c" * 40])
+        self.expect_fail("platform.lock: trusted_workflow_shas must hold 1 or 2 values")
+
+    def test_trusted_value_shape(self) -> None:
+        self.edit_lock(trusted_workflow_shas=[B, "abc"])
+        self.expect_fail(
+            "platform.lock: trusted_workflow_shas value 'abc' must be 40 lowercase hex"
+        )
+
+    def test_trusted_values_distinct(self) -> None:
+        self.edit_lock(trusted_workflow_shas=[B, B])
+        self.expect_fail("platform.lock: trusted_workflow_shas values must be distinct")
+
+    def test_trusted_must_contain_workflow_sha(self) -> None:
+        self.edit_lock(trusted_workflow_shas=[A])
+        self.expect_fail("platform.lock: trusted_workflow_shas must contain workflow_sha")
+
+    def test_n_and_n_minus_one_pass(self) -> None:
+        self.edit_lock(trusted_workflow_shas=[B, A])
+        self.expect_ok()
+
+
+class ManifestAndPins(OfflineCase):
+    def test_platform_yaml_version_must_match(self) -> None:
+        self.edit("platform.yaml", "v0.2.0", "v0.3.0")
+        self.expect_fail(
+            "platform.yaml: platform.version 'v0.3.0' does not match platform.lock version 'v0.2.0'"
+        )
+
+    def test_platform_yaml_missing(self) -> None:
+        (self.root / "platform.yaml").unlink()
+        self.expect_fail("platform.yaml: cannot read")
+
+    def test_uses_sha_must_be_workflow_sha(self) -> None:
+        self.edit(".github/workflows/terraform.yml", f"@{B}", f"@{A}")
+        self.expect_fail(f"is pinned to {A}, not workflow_sha {B} (L3)")
+
+    def test_uses_with_a_tag_is_refused(self) -> None:
+        self.edit(".github/workflows/terraform.yml", f"@{B}", "@v0.2.0")
+        self.expect_fail("is pinned to v0.2.0, not workflow_sha")
+
+    def test_uses_without_a_ref_is_refused(self) -> None:
+        self.edit(".github/workflows/terraform.yml", f"@{B}", "")
+        self.expect_fail("has no @ref, expected workflow_sha")
+
+    def test_uses_comment_must_be_the_lock_version(self) -> None:
+        self.edit(".github/workflows/terraform.yml", "# v0.2.0", "# v0.1.0")
+        self.expect_fail("has version comment 'v0.1.0' but platform.lock version is v0.2.0 (L3)")
+
+    def test_uses_comment_missing(self) -> None:
+        self.edit(".github/workflows/terraform.yml", " # v0.2.0", "")
+        self.expect_fail("has no '# vX.Y.Z' version comment")
+
+    def test_uses_in_flow_style_is_read(self) -> None:
+        wf = self.root / ".github" / "workflows" / "flow.yaml"
+        uses = f"{PLATFORM}/.github/workflows/reusable-terraform-plan.yml@{A}"
+        wf.write_text("jobs:\n  plan: {uses: '" + uses + "'}  # v0.2.0\n", encoding="utf-8")
+        self.expect_fail(f"flow.yaml:2: uses '{uses}' is pinned to {A}")
+
+    def test_uses_in_a_composite_action_is_read(self) -> None:
+        action = self.root / ".github" / "actions" / "x" / "action.yml"
+        action.parent.mkdir(parents=True)
+        uses = f"{PLATFORM}/.github/actions/y@{A}"
+        action.write_text(
+            "runs:\n  using: composite\n  steps:\n    - uses: " + uses + " # v0.2.0\n",
+            encoding="utf-8",
+        )
+        self.expect_fail("action.yml:4: uses")
+
+    def test_uses_of_a_case_variant_of_the_repo_is_still_checked(self) -> None:
+        self.edit(
+            ".github/workflows/terraform.yml",
+            "trungleviet-agilityio/sis-platform",
+            "Trungleviet-Agilityio/Sis-Platform",
+        )
+        self.edit(".github/workflows/terraform.yml", f"@{B}", f"@{A}")
+        self.expect_fail("is pinned to")
+
+    def test_other_actions_are_not_this_checks_business(self) -> None:
+        wf = self.root / ".github" / "workflows" / "other.yml"
+        wf.write_text(
+            "jobs:\n  j:\n    steps:\n      - uses: actions/checkout@" + A + " # v7.0.0\n",
+            encoding="utf-8",
+        )
+        self.expect_ok()
+
+    def test_module_ref_must_be_release_sha(self) -> None:
+        self.edit("infra/bootstrap/main.tf", f"ref={A}", f"ref={B}")
+        self.expect_fail(f"is pinned to ref {B}, not release_sha {A} (L3)")
+
+    def test_module_ref_may_not_be_a_tag(self) -> None:
+        self.edit("infra/bootstrap/main.tf", f"ref={A}", "ref=v0.2.0")
+        self.expect_fail("is pinned to ref v0.2.0, not release_sha")
+
+    def test_module_without_ref(self) -> None:
+        self.edit("infra/bootstrap/main.tf", f"?ref={A}", "")
+        self.expect_fail("remote module source")
+
+    def test_registry_module_is_refused(self) -> None:
+        self.edit("infra/bootstrap/main.tf", "../../local-module", "terraform-aws-modules/vpc/aws")
+        self.expect_fail("remote module source 'terraform-aws-modules/vpc/aws' is not sis-platform")
+
+    def test_other_git_module_is_refused(self) -> None:
+        self.edit(
+            "infra/bootstrap/main.tf",
+            "../../local-module",
+            "git::https://github.com/o/r.git//m?ref=" + A,
+        )
+        self.expect_fail("remote module source 'git::https://github.com/o/r.git//m?ref=")
+
+    def test_other_platform_repo_spelling_is_refused(self) -> None:
+        self.edit(
+            "infra/bootstrap/main.tf",
+            "../../local-module",
+            f"github.com/{PLATFORM}//modules/x?ref={A}",
+        )
+        self.expect_fail("remote module source")
+
+    def test_provider_source_is_not_a_module_source(self) -> None:
+        self.expect_ok()  # main.tf holds required_providers source = "hashicorp/aws"
+
+    def test_terraform_dirs_are_skipped(self) -> None:
+        cache = self.root / "infra" / "bootstrap" / ".terraform" / "modules" / "x.tf"
+        cache.parent.mkdir(parents=True)
+        cache.write_text('module "x" {\n  source = "registry/x/aws"\n}\n', encoding="utf-8")
+        self.expect_ok()
+
+
+class Settings(OfflineCase):
+    def test_settings_missing(self) -> None:
+        (self.root / ".claude" / "settings.json").unlink()
+        self.expect_fail(".claude/settings.json: cannot read")
+
+    def test_settings_not_json(self) -> None:
+        (self.root / ".claude" / "settings.json").write_text("{", encoding="utf-8")
+        self.expect_fail(".claude/settings.json: not valid JSON")
+
+    def test_marketplace_missing(self) -> None:
+        (self.root / ".claude" / "settings.json").write_text("{}", encoding="utf-8")
+        self.expect_fail("extraKnownMarketplaces.sis-platform is missing")
+
+    def test_marketplace_ref_must_be_the_version(self) -> None:
+        self.edit(".claude/settings.json", '"ref": "v0.2.0"', '"ref": "main"')
+        self.expect_fail("source.ref is 'main', expected the lock version 'v0.2.0' (L4)")
+
+    def test_marketplace_repo_must_be_the_platform(self) -> None:
+        self.edit(".claude/settings.json", PLATFORM, "someone/else")
+        self.expect_fail("source.repo is 'someone/else'")
+
+    def test_marketplace_source_kind(self) -> None:
+        self.edit(".claude/settings.json", '"source": "github"', '"source": "git"')
+        self.expect_fail("source.source must be 'github'")
+
+
+class Usage(OfflineCase):
+    def test_unknown_option(self) -> None:
+        rc, _out, err = run_main(check_lock, [str(self.root), "--bogus"])
+        self.assertEqual(rc, 2)
+        self.assertIn("Usage:", err)
+
+    def test_not_a_directory(self) -> None:
+        rc, _out, err = run_main(check_lock, [str(self.root / "nope")])
+        self.assertEqual(rc, 2)
+        self.assertIn("is not a directory", err)
+
+    def test_exit_status_from_a_real_process(self) -> None:
+        script = REPO_ROOT / "scripts" / "platform" / "check_lock.py"
+        done = subprocess.run(  # noqa: S603
+            [sys.executable, str(script), str(self.root)], capture_output=True, check=False
+        )
+        self.assertEqual(done.returncode, 0, done.stderr.decode())
+        (self.root / "platform.lock").unlink()
+        done = subprocess.run(  # noqa: S603
+            [sys.executable, str(script), str(self.root)], capture_output=True, check=False
+        )
+        self.assertEqual(done.returncode, 1)
+        self.assertIn("platform.lock: cannot read", done.stderr.decode())
+
+
+class RemoteCase(OfflineCase):
+    """A fixture sis-platform repo: v0.1.0 (c1), v0.1.1 (docs only), v0.2.0 (moves the closure)."""
+
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.plat = Repo(self.tmp / "platform")
+        self.c1 = self.plat.seed("0.1.0")
+        self.plat.tag("v0.1.0")
+        self.plat.write("docs/readme.md", "more docs\n")
+        self.c2 = self.plat.commit("docs")
+        self.plat.tag("v0.1.1")
+        self.plat.write("scripts/platform/tool.py", "print('v2')\n")
+        self.c3 = self.plat.commit("tool")
+        self.plat.bump_versions("0.2.0")
+        self.c4 = self.plat.commit("bump")
+        self.plat.tag("v0.2.0")
+        # v0.2.0 is c4; its workflow_sha is c3 (the last commit that touched the closure).
+        self.root = consumer(self.tmp / "consumer", "v0.2.0", self.c4, self.c3)
+
+    def run_remote(self) -> tuple[int, str]:
+        rc, _out, err = run_main(
+            check_lock, [str(self.root), "--remote", "--platform-repo", str(self.plat.path)]
+        )
+        return rc, err
+
+    def expect_remote_ok(self) -> None:
+        self.assertEqual(self.run_remote(), (0, ""))
+
+    def expect_remote_fail(self, fragment: str) -> None:
+        rc, err = self.run_remote()
+        self.assertEqual(rc, 1, err)
+        self.assertIn(fragment, err)
+
+    def relock(self, release: str, workflow: str, trusted: Optional[List[str]] = None) -> None:
+        self.root = consumer(self.tmp / "consumer", "v0.2.0", release, workflow, trusted)
+
+
+class RemoteChecks(RemoteCase):
+    def test_a_good_consumer_passes_remotely(self) -> None:
+        self.expect_remote_ok()
+
+    def test_offline_mode_never_touches_the_platform_repo(self) -> None:
+        shutil.rmtree(self.plat.path)
+        self.expect_ok()
+
+    def test_remote_without_a_source_uses_the_public_url(self) -> None:
+        self.assertEqual(check_lock.PLATFORM_URL, f"https://github.com/{PLATFORM}.git")
+
+    def test_clone_failure_is_reported(self) -> None:
+        shutil.rmtree(self.plat.path)
+        self.expect_remote_fail("cannot clone")
+
+    def test_tag_missing(self) -> None:
+        helpers.git(self.plat.path, "tag", "-d", "v0.2.0")
+        self.expect_remote_fail("tag v0.2.0 does not exist in sis-platform")
+
+    def test_tag_points_elsewhere(self) -> None:
+        self.relock(self.c2, self.c3)
+        self.expect_remote_fail(f"tag v0.2.0 resolves to {self.c4}, not release_sha {self.c2}")
+
+    def test_release_sha_not_on_main(self) -> None:
+        self.plat.checkout_new("side", self.c4)
+        self.plat.write("scripts/platform/tool.py", "print('side')\n")
+        side = self.plat.commit("side")
+        helpers.git(self.plat.path, "tag", "-f", "v0.2.0", side)
+        self.plat.checkout("main")
+        self.relock(side, side)
+        self.expect_remote_fail(
+            f"release_sha {side} is not an ancestor of the sis-platform main tip"
+        )
+
+    def test_recomputed_workflow_sha_must_match(self) -> None:
+        self.relock(self.c4, self.c1, [self.c1])
+        self.expect_remote_fail(
+            f"the closure recomputed at release_sha is {self.c3}, not workflow_sha {self.c1} (L3)"
+        )
+
+    def test_trusted_sha_not_a_commit(self) -> None:
+        self.relock(self.c4, self.c3, [self.c3, "d" * 40])
+        self.expect_remote_fail(f"trusted_workflow_shas {'d' * 40}: not a commit in sis-platform")
+
+    def test_trusted_sha_not_on_main(self) -> None:
+        # An impostor: a commit on a side branch that carries the closure at some other state.
+        self.plat.checkout_new("side", self.c4)
+        self.plat.write("scripts/platform/tool.py", "print('evil')\n")
+        evil = self.plat.commit("evil")
+        self.plat.checkout("main")
+        self.relock(self.c4, self.c3, [self.c3, evil])
+        self.expect_remote_fail(
+            f"trusted_workflow_shas {evil}: not an ancestor of the sis-platform main tip (L3 a)"
+        )
+
+    def test_trusted_sha_not_a_released_workflow_sha(self) -> None:
+        # On main, but no v* tag's closure recomputes to it (the closure moved only at c1 and c3).
+        self.relock(self.c4, self.c3, [self.c3, self.c4])
+        self.expect_remote_fail(
+            f"trusted_workflow_shas {self.c4}: not the workflow_sha of any released v* tag (L3 b)"
+        )
+
+    def test_previous_released_workflow_sha_is_trusted(self) -> None:
+        self.relock(self.c4, self.c3, [self.c3, self.c1])
+        self.expect_remote_ok()
+
+    def test_trusted_sha_that_holds_reusable_release_is_refused(self) -> None:
+        self.plat.write(".github/workflows/reusable-release.yml", "name: release\n")
+        self.plat.write("scripts/platform/tool.py", "print('v3')\n")
+        c5 = self.plat.commit("deploy workflow")
+        self.plat.bump_versions("0.3.0")
+        self.plat.commit("bump")
+        self.plat.tag("v0.3.0")
+        self.relock(self.c4, self.c3, [self.c3, c5])
+        self.expect_remote_fail(
+            f"trusted_workflow_shas {c5}: its tree holds .github/workflows/reusable-release.yml "
+            "while DEPLOY_TRUST_ALLOWED is false (L3 c)"
+        )
+
+    def test_deploy_trust_flag_lifts_the_third_check(self) -> None:
+        self.plat.write(".github/workflows/reusable-release.yml", "name: release\n")
+        c5 = self.plat.commit("deploy workflow")
+        self.plat.tag("v0.3.0")
+        self.relock(self.c4, self.c3, [self.c3, c5])
+        self.expect_remote_fail("(L3 c)")
+        original = check_lock.DEPLOY_TRUST_ALLOWED
+        check_lock.DEPLOY_TRUST_ALLOWED = True
+        self.addCleanup(setattr, check_lock, "DEPLOY_TRUST_ALLOWED", original)
+        self.expect_remote_ok()
+
+    def test_remote_also_reports_offline_findings(self) -> None:
+        self.edit_lock(lock_version=2)
+        self.expect_remote_fail("platform.lock: lock_version must be 1")
+
+    def test_a_tag_from_before_the_closure_existed_is_skipped(self) -> None:
+        # v0.0.9 has no closure.txt: it is no released workflow_sha and must not crash the check.
+        plat = Repo(self.tmp / "platform2")
+        plat.write("README.md", "x\n")
+        plat.commit("init")
+        plat.tag("v0.0.9")
+        plat.seed("0.2.0")
+        workflow = plat.head()
+        plat.tag("v0.2.0")
+        self.root = consumer(self.tmp / "consumer2", "v0.2.0", workflow, workflow)
+        rc, _out, err = run_main(
+            check_lock, [str(self.root), "--remote", "--platform-repo", str(plat.path)]
+        )
+        self.assertEqual((rc, err), (0, ""))
+
+
+if __name__ == "__main__":
+    unittest.main()
