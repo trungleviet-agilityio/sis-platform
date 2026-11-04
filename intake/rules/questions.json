@@ -21,7 +21,7 @@
       "questions": [
         {"id": "q2.duration", "ask": "What is the longest request or job, in seconds?", "manifest_path": "workload.max_duration_seconds", "options": [], "recommend": "Under 29 s keeps HTTP API and Lambda viable (V09); over 900 s rules Lambda out (V08).", "pillar": "PERF02-BP01"},
         {"id": "q2.payload", "ask": "What is the largest request or response payload, in whole MB?", "manifest_path": "workload.max_payload_mb", "options": [], "recommend": "Over 6 MB rules Lambda out (V08); use presigned S3 uploads to stay on Lambda.", "pillar": "PERF02-BP01"},
-        {"id": "q2.needs", "ask": "Does the app need a GPU, OS-level access or a licensed product?", "manifest_path": "workload.needs", "options": ["gpu", "os", "licence", "none"], "recommend": "Any of these rules Lambda out; choose ecs-fargate (os, licence) or ec2-asg (gpu).", "pillar": "PERF02-BP01"}
+        {"id": "q2.needs", "ask": "Does the app need a GPU, OS-level access, a licensed product, or WebSockets and other long-lived connections?", "manifest_path": "workload.needs", "options": ["gpu", "os", "licence", "websockets", "none"], "recommend": "Any of these rules Lambda out (V08); choose ecs-fargate (os, licence, websockets) or ec2-asg (gpu).", "pillar": "PERF02-BP01"}
       ]
     },
     {
@@ -31,7 +31,8 @@
       "optional": false,
       "questions": [
         {"id": "q3.pattern", "ask": "Is traffic steady, spiky or mostly idle?", "manifest_path": "runtime.kind", "options": ["steady", "spiky", "idle"], "recommend": "Spiky or idle: lambda-web (scale to zero, SUS02-BP01). Steady and high: ecs-fargate.", "pillar": "COST"},
-        {"id": "q3.rps", "ask": "What is the expected peak requests per second and the latency target?", "manifest_path": "", "options": [], "recommend": "Under a few hundred RPS with a relaxed latency target fits Lambda; tight p99 targets favour ecs-fargate.", "pillar": "PERF"},
+        {"id": "q3.rps", "ask": "What is the expected peak requests per second (a whole number)?", "manifest_path": "workload.peak_rps", "options": [], "recommend": "Under a few hundred RPS fits Lambda. Required for a prod tier env (V24).", "pillar": "PERF05-BP01"},
+        {"id": "q3.p95", "ask": "What is the p95 latency target in milliseconds?", "manifest_path": "workload.p95_ms", "options": [], "recommend": "A relaxed target (500 to 1000 ms) fits Lambda; tight targets favour ecs-fargate. Required for a prod tier env (V24).", "pillar": "PERF05-BP01"},
         {"id": "q3.exposure", "ask": "Is the app public or internal, and is it abuse-prone?", "manifest_path": "runtime.front_door", "options": ["http-api", "function-url", "cloudfront", "alb", "none"], "recommend": "Lambda: http-api (throttle as cost ceiling); function-url when budget-first; cloudfront with WAF only when public and abuse-prone. ECS and EC2: alb.", "pillar": "PERF"}
       ]
     },
@@ -53,6 +54,7 @@
       "questions": [
         {"id": "q5.risk", "ask": "How much release risk can the product tolerate?", "manifest_path": "", "options": ["low", "medium", "high"], "recommend": "Low tolerance: canary or linear with rollback: alarm. High tolerance: all-at-once.", "pillar": "OPS06"},
         {"id": "q5.strategy", "ask": "Which release strategy per env: all-at-once, rolling, canary, linear or blue-green?", "manifest_path": "envs.<env>.release.strategy", "options": ["all-at-once", "rolling", "canary", "linear", "blue-green"], "recommend": "dev: all-at-once or canary. prod: canary with rollback: alarm, steps rising to 100 and bake_minutes >= 1 (V01, V02). Check the compatibility matrix per runtime.", "pillar": "OPS06"},
+        {"id": "q5.probes", "ask": "Which paths should a canary or linear release probe besides the health path?", "manifest_path": "envs.<env>.release.probes", "options": [], "recommend": "/version (it returns the commit SHA and image digest). A canary or linear strategy needs at least one path other than the health path (V19).", "pillar": "OPS06-BP04"},
         {"id": "q5.rto", "ask": "What recovery time (RTO) and recovery point (RPO) objectives, in minutes?", "manifest_path": "dr.rto_minutes", "options": [], "recommend": "RTO of 240 and RPO of 1440 suit backup-restore for a small product (V13 warns on optimistic values).", "pillar": "REL13-BP01"},
         {"id": "q5.dr", "ask": "Which DR strategy: backup-restore, pilot-light, warm-standby or multi-site?", "manifest_path": "dr.strategy", "options": ["backup-restore", "pilot-light", "warm-standby", "multi-site"], "recommend": "backup-restore unless RTO is under 60 minutes; warm-standby and multi-site need a budget of at least 100 USD (V14).", "pillar": "REL13-BP02"}
       ]
@@ -63,11 +65,13 @@
       "pillars": ["SEC01-BP01", "SEC", "SUS"],
       "optional": false,
       "questions": [
-        {"id": "q6.envs", "ask": "Which environments are needed?", "manifest_path": "envs", "options": [], "recommend": "dev and prod; one account per env (SEC01-BP01). prod needs promote_from: dev (V11).", "pillar": "SEC01-BP01"},
+        {"id": "q6.owner", "ask": "Who owns the project: a GitHub login or team handle (never an email)?", "manifest_path": "project.owner", "options": [], "recommend": "The GitHub login or team that gets the budget and incident alerts.", "pillar": "OPS02-BP01"},
+        {"id": "q6.envs", "ask": "Which environments are needed?", "manifest_path": "envs", "options": [], "recommend": "dev and prod; one account per env (SEC01-BP01). prod needs promote_from: dev (V11), and all account labels must differ (V20).", "pillar": "SEC01-BP01"},
+        {"id": "q6.tier", "ask": "Is each env tier prod or nonprod?", "manifest_path": "envs.<env>.tier", "options": ["prod", "nonprod"], "recommend": "The tier, not the name, drives the prod rules (V11, V16, V18, V22 to V24). A prod tier env needs data_class, RTO and RPO, peak_rps and p95_ms.", "pillar": "SEC01-BP01"},
         {"id": "q6.accounts", "ask": "What account label does each env use (a label such as dev or prod, never an account ID)?", "manifest_path": "envs.<env>.account", "options": [], "recommend": "The env name. The label maps to an ID in the project repo's GitHub environment variables, never in the manifest (V10).", "pillar": "SEC01-BP06"},
         {"id": "q6.data_class", "ask": "What is the data classification: public, internal, confidential or regulated?", "manifest_path": "compliance.data_class", "options": ["public", "internal", "confidential", "regulated"], "recommend": "internal unless real user data is stored.", "pillar": "SEC"},
         {"id": "q6.kms", "ask": "Is a customer-managed KMS key required?", "manifest_path": "compliance.kms_cmk", "options": ["true", "false"], "recommend": "false (AES256 default) unless a compliance rule demands it.", "pillar": "SEC"},
-        {"id": "q6.region", "ask": "Which AWS region for each env?", "manifest_path": "envs.<env>.region", "options": [], "recommend": "The region nearest the users that offers every needed service; fewer regions means less cost and carbon (SUS).", "pillar": "SUS"}
+        {"id": "q6.region", "ask": "Which AWS region for each env?", "manifest_path": "envs.<env>.region", "options": [], "recommend": "ap-southeast-1: the only allowed region in Phase 1 (V25). Fewer regions means less cost and carbon (SUS01-BP01).", "pillar": "SUS"}
       ]
     },
     {

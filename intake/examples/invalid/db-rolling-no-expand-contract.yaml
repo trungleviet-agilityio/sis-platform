@@ -1,12 +1,13 @@
 # expect: V12
 schema_version: 1
-project: {name: demo-app, prefix: demo}
-platform: {version: v0.1.0}
+project: {name: demo-app, prefix: demo, owner: demo-team}
+platform: {version: v0.2.0}
 runtime: {kind: ecs-fargate, front_door: alb}
 budget: {monthly_usd: 100}
 database: {kind: postgres}
 envs:
   dev:
+    tier: nonprod
     account: dev
     region: ap-southeast-1
     release: {strategy: rolling, rollback: health, engine: ecs-native}

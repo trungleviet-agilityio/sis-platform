@@ -1,23 +1,26 @@
-# yaml-language-server: $schema=https://raw.githubusercontent.com/trungleviet-agilityio/sis-platform/v0.1.0/intake/schema/platform.schema.json
+# yaml-language-server: $schema=https://raw.githubusercontent.com/trungleviet-agilityio/sis-platform/v0.2.0/intake/schema/platform.schema.json
 # ECS Fargate lab (ship-it-safely). The lab keeps x86_64.
 # Expected warnings: V06 (ALB, budget 20), V16 (scale to zero on prod), V17 (adapter not built).
 schema_version: 1
-project: {name: ship-it-safely, prefix: sis}
-platform: {version: v0.1.0}
-workload: {shape: web, port: 8080, health_path: /health, max_duration_seconds: 30, max_payload_mb: 1}
+project: {name: ship-it-safely, prefix: sis, owner: trungleviet-agilityio}
+platform: {version: v0.2.0}
+workload: {shape: web, port: 8080, health_path: /health, max_duration_seconds: 30, max_payload_mb: 1, peak_rps: 20, p95_ms: 800}
 runtime: {kind: ecs-fargate, arch: x86_64, front_door: alb}
 ci: {provider: github-actions}
 budget: {monthly_usd: 20}
 dr: {strategy: backup-restore, rto_minutes: 240, rpo_minutes: 1440}
+compliance: {data_class: internal}
 database: {kind: none}
 envs:
   dev:
+    tier: nonprod
     account: dev
     region: ap-southeast-1
     delivery: push
     scale_to_zero: true
     release: {strategy: rolling, rollback: health, engine: ecs-native}
   prod:
+    tier: prod
     account: prod
     region: ap-southeast-1
     delivery: push

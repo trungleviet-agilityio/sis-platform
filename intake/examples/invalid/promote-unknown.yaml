@@ -1,0 +1,12 @@
+# expect: V20
+schema_version: 1
+project: {name: demo-app, prefix: demo, owner: demo-team}
+platform: {version: v0.2.0}
+workload: {shape: web, health_path: /health, peak_rps: 50, p95_ms: 500}
+runtime: {kind: lambda-web}
+budget: {monthly_usd: 50}
+dr: {rto_minutes: 240, rpo_minutes: 1440}
+compliance: {data_class: internal}
+envs:
+  dev: {tier: nonprod, account: dev, region: ap-southeast-1}
+  prod: {tier: prod, account: prod, region: ap-southeast-1, promote_from: staging}

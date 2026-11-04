@@ -1,7 +1,8 @@
 # expect: PARSE
 schema_version: 1
-project: {name: demo-app, prefix: demo}
-platform: {version: v0.1.0}
+project: {name: demo-app, prefix: demo, owner: demo-team}
+platform: {version: v0.2.0}
 runtime: {kind: lambda-web}
+budget: {monthly_usd: 20}
 envs:
-  dev: {account: dev, region: ap-southeast-1, release: {steps: [10, 100]}}
+  dev: {tier: nonprod, account: dev, region: ap-southeast-1, release: {steps: [10, 100]}}
