@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "urn:sis-platform:adapter-result:1",
   "title": "sis-platform adapter result line, contract_version 1",
-  "description": "The one JSON line an adapter verb prints on stdout (K3). Uses only the keyword subset interpreted by intake/sis_intake/schema.py. Rules a schema cannot state (release_id = <env>-<first 12 hex of digest>, state against exit code, candidate_percent) are in adapters/CONTRACT.md and the conformance suite. live_ref, candidate_ref and endpoint are empty strings when there is none.",
+  "description": "The one JSON line an adapter verb prints on stdout (K3). Uses only the keyword subset interpreted by intake/sis_intake/schema.py. Rules a schema cannot state (release_id = <env>-<first 12 hex of digest>, state against exit code, candidate_percent for succeeded and rolled_back) are in adapters/CONTRACT.md and the conformance suite. live_ref, candidate_ref and endpoint are empty strings when there is none.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -12,8 +12,8 @@
   "properties": {
     "contract_version": {"const": 1},
     "verb": {"enum": ["deploy", "verify", "rollback", "status"]},
-    "env": {"type": "string", "pattern": "^[a-z][a-z0-9]{1,15}$"},
-    "release_id": {"type": "string", "pattern": "^[a-z][a-z0-9]{1,15}-[0-9a-f]{12}$"},
+    "env": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,30}$"},
+    "release_id": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,30}-[0-9a-f]{12}$"},
     "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
     "sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
     "live_ref": {"type": "string"},

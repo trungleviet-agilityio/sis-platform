@@ -39,7 +39,7 @@
   "$defs": {
     "hosts": {
       "type": "array",
-      "items": {"type": "string", "pattern": "^([a-z0-9.-]|\\{region\\})+$"}
+      "items": {"type": "string", "pattern": "^([a-z0-9]|\\{region\\})([a-z0-9-]|\\{region\\})*(\\.([a-z0-9]|\\{region\\})([a-z0-9-]|\\{region\\})*)*$"}
     }
   }
 }

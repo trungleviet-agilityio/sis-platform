@@ -17,23 +17,13 @@ import unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 ADAPTERS = os.path.dirname(HERE)
 ROOT = os.path.dirname(ADAPTERS)
-sys.path.insert(0, os.path.join(ROOT, "intake"))
+sys.path.insert(0, ADAPTERS)
 
+from contract_check import EXIT_STATES, STATES, VERBS, check_line, release_id  # noqa: E402
 from sis_intake import schema as z4  # noqa: E402
 
 JSON_TYPES = {"string", "integer", "number", "boolean", "array", "object", "null"}
 ALLOWED_SCHEMA_URI = "https://json-schema.org/draft/2020-12/schema"
-
-# K4: exit code -> states a result line may carry with it. Cross-field rules are outside the Z4 subset, so
-# they live here and in CONTRACT.md, and the conformance suite (K7) repeats them.
-EXIT_STATES = {
-    0: {"succeeded"},
-    1: {"failed", "rolled_back"},
-    2: {"failed"},
-    3: {"publishing", "verifying", "shifting", "baking"},
-}
-STATES = ["publishing", "verifying", "shifting", "baking", "succeeded", "failed", "rolled_back"]
-VERBS = ["deploy", "verify", "rollback", "status"]
 
 DIGEST = "sha256:" + "ab12cd34ef56" * 5 + "ab12"
 SHA = "0123456789abcdef0123456789abcdef01234567"
@@ -95,21 +85,8 @@ def _walk(node, root, path, problems):
         _walk(node["items"], root, path + "/items", problems)
 
 
-def check_line(doc, verb_expected=None, exit_code=None):
-    """Full result-line check: schema, K5 release_id, K4 exit code vs state. Returns a list of problems."""
-    out = [i.message for i in z4.validate(doc, load("result.schema.json"))]
-    if out:
-        return out
-    if doc["release_id"] != "%s-%s" % (doc["env"], doc["digest"][len("sha256:"):][:12]):
-        out.append("release_id must be <env>-<first 12 hex of the digest> (K5)")
-    if verb_expected and doc["verb"] != verb_expected:
-        out.append("verb %r does not match the verb that ran (%r)" % (doc["verb"], verb_expected))
-    if exit_code is not None and doc["state"] not in EXIT_STATES[exit_code]:
-        out.append("state %r is not allowed with exit code %d (K4)" % (doc["state"], exit_code))
-    pct = doc["traffic"]["candidate_percent"]
-    if doc["state"] not in ("shifting", "baking") and pct not in (0, 100):
-        out.append("candidate_percent is 0 or 100 outside shifting and baking")
-    return out
+def pct_for(state):
+    return {"succeeded": 100, "rolled_back": 0}.get(state, 25)
 
 
 def line(**over):
@@ -117,7 +94,7 @@ def line(**over):
         "contract_version": 1,
         "verb": "deploy",
         "env": "dev",
-        "release_id": "dev-" + DIGEST[len("sha256:"):][:12],
+        "release_id": release_id("dev", DIGEST),
         "digest": DIGEST,
         "sha": SHA,
         "live_ref": "",
@@ -157,9 +134,7 @@ class ResultStateTests(unittest.TestCase):
     def test_every_state_validates_with_its_exit_code(self):
         for code, states in EXIT_STATES.items():
             for state in sorted(states):
-                pct = 25 if state in ("shifting", "baking") else 100
-                if state in ("failed", "rolled_back"):
-                    pct = 0
+                pct = pct_for(state)
                 with self.subTest(exit=code, state=state):
                     doc = line(state=state, traffic={"candidate_percent": pct})
                     self.assertEqual(check_line(doc, exit_code=code), [])
@@ -174,13 +149,13 @@ class ResultStateTests(unittest.TestCase):
                 if state in states:
                     continue
                 with self.subTest(exit=code, state=state):
-                    doc = line(state=state, traffic={"candidate_percent": 0})
+                    doc = line(state=state, traffic={"candidate_percent": pct_for(state)})
                     self.assertTrue(check_line(doc, exit_code=code))
 
     def test_every_verb_validates(self):
         for verb in VERBS:
             with self.subTest(verb=verb):
-                self.assertEqual(check_line(line(verb=verb), verb_expected=verb, exit_code=0), [])
+                self.assertEqual(check_line(line(verb=verb), verb=verb, exit_code=0), [])
 
     def test_in_progress_line_mid_shift(self):
         doc = line(state="shifting", traffic={"candidate_percent": 10})
@@ -189,6 +164,37 @@ class ResultStateTests(unittest.TestCase):
     def test_refused_line_exit_2(self):
         doc = line(state="failed", traffic={"candidate_percent": 0}, message="policy refused")
         self.assertEqual(check_line(doc, exit_code=2), [])
+
+
+class RollbackTests(unittest.TestCase):
+    PREV = "sha256:" + "9f" * 32
+    INPUTS = {"SIS_ENV": "dev", "SIS_DIGEST": DIGEST, "SIS_PREV_DIGEST": PREV, "SIS_SHA": SHA}
+
+    def rb(self, **over):
+        base = {"verb": "rollback", "digest": self.PREV, "release_id": release_id("dev", self.PREV)}
+        base.update(over)
+        return line(**base)
+
+    def test_rollback_line_describes_the_target(self):
+        self.assertEqual(check_line(self.rb(), verb="rollback", exit_code=0, inputs=self.INPUTS), [])
+
+    def test_rollback_line_with_the_digest_rolled_back_from_is_rejected(self):
+        doc = self.rb(digest=DIGEST, release_id=release_id("dev", DIGEST))
+        self.assertTrue(check_line(doc, verb="rollback", inputs=self.INPUTS))
+
+    def test_rollback_release_id_must_follow_the_target(self):
+        doc = self.rb(release_id=release_id("dev", DIGEST))
+        self.assertTrue(check_line(doc, verb="rollback"))
+
+    def test_rollback_does_not_echo_sis_sha(self):
+        self.assertEqual(check_line(self.rb(sha="f" * 40), verb="rollback", inputs=self.INPUTS), [])
+
+    def test_deploy_line_must_echo_the_inputs(self):
+        self.assertEqual(check_line(line(), verb="deploy", inputs=self.INPUTS), [])
+        self.assertTrue(check_line(self.rb(verb="deploy"), verb="deploy", inputs=self.INPUTS))
+        self.assertTrue(check_line(line(sha="f" * 40), verb="deploy", inputs=self.INPUTS))
+        other = line(env="prod", release_id=release_id("prod", DIGEST))
+        self.assertTrue(check_line(other, verb="deploy", inputs=self.INPUTS))
 
 
 class ResultInvalidTests(unittest.TestCase):
@@ -232,11 +238,26 @@ class ResultInvalidTests(unittest.TestCase):
         self.assertBad(release_id="dev-" + "0" * 12)
 
     def test_verb_mismatch_is_rejected(self):
-        self.assertTrue(check_line(line(verb="status"), verb_expected="deploy"))
+        self.assertTrue(check_line(line(verb="status"), verb="deploy"))
 
-    def test_progress_percent_outside_shift_is_rejected(self):
-        doc = line(state="succeeded", traffic={"candidate_percent": 30})
-        self.assertTrue(check_line(doc))
+    def test_percent_rules_only_bind_succeeded_and_rolled_back(self):
+        self.assertTrue(check_line(line(state="succeeded", traffic={"candidate_percent": 30})))
+        self.assertTrue(check_line(line(state="rolled_back", traffic={"candidate_percent": 40})))
+        # A failed partial shift may leave any share on the candidate; other states take any 0..100.
+        for state in ("failed", "publishing", "verifying", "shifting", "baking"):
+            for pct in (0, 40, 100):
+                with self.subTest(state=state, pct=pct):
+                    doc = line(state=state, traffic={"candidate_percent": pct})
+                    self.assertEqual(check_line(doc), [])
+
+    def test_env_pattern_accepts_hyphens_like_account_labels(self):
+        for env in ("dev", "prod-eu", "a"):
+            doc = line(env=env, release_id=release_id(env, DIGEST))
+            with self.subTest(env=env):
+                self.assertEqual(check_line(doc), [])
+        for env in ("Dev", "-dev", "1dev", "d_ev"):
+            with self.subTest(env=env):
+                self.assertTrue(check_line(line(env=env, release_id=env + "-" + DIGEST[7:19])))
 
     def test_not_an_object(self):
         self.assertTrue(check_line([line()]))
@@ -265,17 +286,8 @@ def manifest_kinds():
     return manifest_schema()["properties"]["runtime"]["properties"]["kind"]["enum"]
 
 
-def find_enum(node, key, must_contain):
-    """First `properties.<key>.enum` that contains must_contain, anywhere in the manifest schema."""
-    if isinstance(node, dict):
-        props = node.get("properties", {})
-        if key in props and all(m in props[key].get("enum", []) for m in must_contain):
-            return props[key]["enum"]
-        for value in node.values():
-            found = find_enum(value, key, must_contain)
-            if found:
-                return found
-    return None
+def release_enum(key):
+    return manifest_schema()["$defs"]["release"]["properties"][key]["enum"]
 
 
 class AdapterDeclarationTests(unittest.TestCase):
@@ -298,12 +310,12 @@ class AdapterDeclarationTests(unittest.TestCase):
         self.assertEqual(self.issues(adapter(kind="project-batch")), [])
 
     def test_strategies_match_manifest_enum(self):
-        enum = find_enum(manifest_schema(), "strategy", ["all-at-once", "canary"])
-        self.assertEqual(load("adapter.schema.json")["properties"]["strategies"]["items"]["enum"], enum)
+        self.assertEqual(load("adapter.schema.json")["properties"]["strategies"]["items"]["enum"],
+                         release_enum("strategy"))
 
     def test_engines_match_manifest_enum(self):
-        enum = find_enum(manifest_schema(), "engine", ["auto", "pipeline"])
-        self.assertEqual(load("adapter.schema.json")["properties"]["engines"]["items"]["enum"], enum)
+        self.assertEqual(load("adapter.schema.json")["properties"]["engines"]["items"]["enum"],
+                         release_enum("engine"))
 
     def test_missing_required(self):
         for key in load("adapter.schema.json")["required"]:
@@ -326,13 +338,15 @@ class AdapterDeclarationTests(unittest.TestCase):
 
     def test_egress_templates_allow_only_region_placeholder(self):
         for host in ("lambda.{account}.amazonaws.com", "*.amazonaws.com", "https://lambda.amazonaws.com",
-                     "lambda.{region.amazonaws.com", "Lambda.amazonaws.com", "host name"):
+                     "lambda.{region.amazonaws.com", "Lambda.amazonaws.com", "host name", "a..b", ".a.com", "a.com.",
+                     "-a.com", "a.-b.com"):
             with self.subTest(host=host):
                 bad = adapter()
                 bad["egress_hosts"]["deploy"] = [host]
                 self.assertTrue(self.issues(bad))
         ok = adapter()
-        ok["egress_hosts"]["deploy"] = ["s3.{region}.amazonaws.com", "sts.amazonaws.com"]
+        ok["egress_hosts"]["deploy"] = ["s3.{region}.amazonaws.com", "sts.amazonaws.com", "{region}.example.com",
+                                       "a-b.c1.com", "x"]
         self.assertEqual(self.issues(ok), [])
 
     def test_bad_values(self):
@@ -361,13 +375,17 @@ class NoImplementationTests(unittest.TestCase):
                 self.assertFalse(os.access(path, os.X_OK), name + " must not be executable")
 
     def test_no_account_ids_or_dashes(self):
-        pat = re.compile(r"(?<![0-9A-Za-z])(?!123456789012)[0-9]{12}(?![0-9A-Za-z])")
-        for name in ("CONTRACT.md", "adapter.schema.json", "result.schema.json"):
-            with open(os.path.join(ADAPTERS, name), encoding="utf-8") as fh:
+        pat = re.compile(r"(?<![0-9A-Za-z])[0-9]{12}(?![0-9A-Za-z])")
+        paths = [os.path.join(ADAPTERS, n) for n in ("CONTRACT.md", "adapter.schema.json", "result.schema.json")]
+        runbooks = os.path.join(ROOT, "docs", "runbooks")
+        if os.path.isdir(runbooks):
+            paths += [os.path.join(runbooks, n) for n in sorted(os.listdir(runbooks)) if n.endswith(".md")]
+        for path in paths:
+            with open(path, encoding="utf-8") as fh:
                 text = fh.read()
-            self.assertIsNone(pat.search(text), name)
-            self.assertNotIn(chr(0x2014), text, name)
-            self.assertNotIn(chr(0x2013), text, name)
+            self.assertIsNone(pat.search(text), path)
+            self.assertNotIn(chr(0x2014), text, path)
+            self.assertNotIn(chr(0x2013), text, path)
 
 
 class ContractDocTests(unittest.TestCase):
@@ -375,16 +393,27 @@ class ContractDocTests(unittest.TestCase):
         with open(os.path.join(ADAPTERS, "CONTRACT.md"), encoding="utf-8") as fh:
             self.doc = fh.read()
 
-    def test_doc_names_every_input_state_verb_and_rule(self):
+    def test_doc_names_every_input_and_verb(self):
         tokens = ["SIS_CONTRACT_VERSION", "SIS_PLAN", "SIS_ENV", "SIS_DIGEST", "SIS_SHA", "SIS_RELEASE_ID",
-                  "SIS_PREV_DIGEST", "adapter.json", "conformance", "major"] + STATES + VERBS
+                  "SIS_PREV_DIGEST", "adapter.json", "conformance", "major"] + VERBS
         for token in tokens:
             with self.subTest(token=token):
                 self.assertIn(token, self.doc)
 
-    def test_doc_exit_code_table(self):
-        for row in ("| 0 |", "| 1 |", "| 2 |", "| 3 |"):
-            self.assertIn(row, self.doc)
+    def test_doc_exit_table_equals_exit_states(self):
+        table = {}
+        for row in self.doc.splitlines():
+            cells = [c.strip() for c in row.strip().strip("|").split("|")]
+            if row.startswith("|") and len(cells) == 3 and cells[0].isdigit():
+                table[int(cells[0])] = {x.strip(" `") for x in cells[2].split(",")}
+        self.assertEqual(table, EXIT_STATES)
+
+    def test_doc_state_list_equals_states(self):
+        line_ = next(x for x in self.doc.splitlines() if x.startswith("States:"))
+        self.assertEqual([x.strip(" `.") for x in line_[len("States:"):].split(",")], STATES)
+
+    def test_doc_marks_rules_beyond_k1_to_k8(self):
+        self.assertGreaterEqual(self.doc.count("(1g addition)"), 4)
 
 
 if __name__ == "__main__":

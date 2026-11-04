@@ -8,6 +8,7 @@ Phase 2 builds one adapter per runtime kind against it. A change to `contract_ve
 |---|---|
 | `adapter.schema.json` | Shape of `adapters/<kind>/adapter.json` (K6) |
 | `result.schema.json` | Shape of the one JSON line every verb prints (K3) |
+| `contract_check.py` | Importable cross-field checks (stdlib), used by the tests and the Phase 2 conformance suite |
 | `tests/test_schemas.py` | Offline tests of both schemas and the cross-field rules below |
 
 Both schemas use only the keyword subset that `intake/sis_intake/schema.py` interprets, so one stdlib
@@ -30,13 +31,18 @@ Inputs are environment variables only. No flags, no stdin.
 
 | Variable | Meaning |
 |---|---|
-| `SIS_CONTRACT_VERSION` | `1`. The adapter refuses (exit 2) any other value |
+| `SIS_CONTRACT_VERSION` | `1`. The adapter refuses (exit 2) any other value (1g addition) |
 | `SIS_PLAN` | Path to the resolved plan JSON (M6) |
 | `SIS_ENV` | Environment name; a key of `envs` in the plan |
-| `SIS_DIGEST` | `sha256:` plus 64 hex, the image or artifact digest |
+| `SIS_DIGEST` | `sha256:` plus 64 hex, the image or artifact digest. In `rollback` it is the digest being rolled back from |
 | `SIS_SHA` | 40-hex source commit of the digest |
 | `SIS_RELEASE_ID` | `<env>-<first 12 hex of the digest>` (K5) |
-| `SIS_PREV_DIGEST` | Rollback only: the digest to return to |
+| `SIS_PREV_DIGEST` | Rollback only: the target digest that becomes live |
+
+In `rollback`, `SIS_PREV_DIGEST` is the target and `SIS_DIGEST` is the digest being rolled back from.
+`SIS_RELEASE_ID` stays that of `SIS_DIGEST`. The result line describes the target: its `digest` is
+`SIS_PREV_DIGEST` and its `release_id` is derived from it (K5). `SIS_SHA` belongs to `SIS_DIGEST`, so a rollback
+line carries the commit of the target as the adapter knows it and is not compared with `SIS_SHA` (1g addition).
 
 The adapter reads strategy, steps, bake, probes, rollback, prefix and the M10 alarm names from the plan only. It
 reads no other source of release behavior (no extra variables, no repository files). The old `PREFIX` and
@@ -53,7 +59,7 @@ Exactly one JSON line on stdout, validated by `result.schema.json`. Logs go to s
 | `env`, `release_id`, `digest`, `sha` | Echo of the inputs |
 | `live_ref` | Runtime-specific reference of what serves traffic (Lambda version, task definition revision, ASG revision, rollout revision). Empty string if none |
 | `candidate_ref` | Same, for the release being rolled out. Empty string if none |
-| `traffic.candidate_percent` | Integer 0 to 100 sent to the candidate |
+| `traffic.candidate_percent` | Integer 0 to 100 sent to the candidate. `env` and `release_id` accept hyphens, like account labels (1g addition) |
 | `state` | See below |
 | `endpoint` | URL of the front door, or empty string |
 | `message` | One human sentence, no secrets, no account IDs |
@@ -71,14 +77,20 @@ States: `publishing`, `verifying`, `shifting`, `baking`, `succeeded`, `failed`, 
 | 2 | refused (precondition or policy, nothing changed) | `failed` |
 | 3 | in progress | `publishing`, `verifying`, `shifting`, `baking` |
 
-Rules a JSON Schema in the Z4 subset cannot state, checked by the tests and the conformance suite:
+Rules a JSON Schema in the Z4 subset cannot state, checked by `contract_check.py`, the tests and the conformance suite:
 
 1. `release_id` equals `<env>-<first 12 hex of the digest>` (K5).
 2. The state fits the exit code, per the table above.
-3. `traffic.candidate_percent` is 0 or 100 unless the state is `shifting` or `baking`.
-4. `verb`, `env`, `digest` and `sha` echo the inputs.
+3. `succeeded` carries `candidate_percent` 100 and `rolled_back` carries 0. Every other state takes any value
+   from 0 to 100, so a failed partial shift can report the share it left on the candidate (1g addition).
+4. `verb`, `env` and `digest` echo the inputs (in `rollback`, `digest` is `SIS_PREV_DIGEST`); `sha` echoes
+   `SIS_SHA` except in `rollback`.
 5. Every failure path still prints a result line (with `state` `failed`) before it exits non-zero, so a workflow
-   never parses a bare stack trace. A crash that prints no line counts as exit 1 with an unknown state.
+   never parses a bare stack trace. A crash that prints no line counts as exit 1 with an unknown state
+   (1g addition).
+
+Rules 2 to 5 are 1g additions; rule 1 is K5. The checks are in `adapters/contract_check.py`, which the
+conformance suite imports.
 
 ## Idempotence and concurrency (K5)
 
@@ -111,6 +123,6 @@ cross-field rules above, and the exit codes for success, failure, refusal and in
 
 ## Versioning (K8)
 
-`contract_version` is `1`. Adding an optional input variable or an optional result field is not allowed inside
-v1 (the schemas set `additionalProperties` to false); any change to the contract is a new `contract_version` and a
-platform major bump.
+`contract_version` is `1`. A change to the contract is a new `contract_version` and a platform major bump (K8,
+CLAUDE.md: an adapter contract change is a major bump). Inside v1 the schemas set `additionalProperties` to
+false, so not even an optional input or result field may be added (1g addition).
