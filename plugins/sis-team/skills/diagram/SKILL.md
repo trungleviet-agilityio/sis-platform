@@ -1,17 +1,17 @@
 ---
 name: diagram
-description: Draw or update an AWS architecture diagram of the ship-it-safely lab as an editable draw.io file with official AWS icons, exported to PNG, built from the real Terraform, workflows and ADRs. Use as /sis-team:diagram <topic>, e.g. "overview", "bootstrap", "ci-cd", "app-ecs".
+description: Draw or update an AWS architecture diagram of this repo as an editable draw.io file with official AWS icons, exported to PNG, built from the real modules, adapters, workflows and ADRs. Use as /sis-team:diagram <topic>, e.g. "overview", "bootstrap", "ci-cd", "app-ecs".
 argument-hint: <topic>
 ---
 
 # /sis-team:diagram
 
-Topic: `$ARGUMENTS` (ask if empty). Output, in `docs/diagrams/` (orchestrator-owned, ADR 0001 D14):
+Topic: `$ARGUMENTS` (ask if empty). Output, in `docs/diagrams/` (orchestrator-owned):
 
 - `<topic>.drawio`: the source, editable in draw.io.
 - `<topic>.drawio.png`: the export with the XML embedded, so the PNG also opens in draw.io.
 - A row in `docs/diagrams/README.md` (diagram, what it shows, `Based on` commit, date), and a link from the
-  README that documents that part (repo README, `infra/terraform/**/README.md`).
+  README that documents that part (repo README, module READMEs).
 
 If `<topic>.drawio` exists, update it instead of starting over.
 
@@ -19,13 +19,13 @@ If `<topic>.drawio` exists, update it instead of starting over.
 
 Draw only what the repo says. Read, in this order, and note `file:line` for every box and arrow:
 
-1. `infra/terraform/**` (resources, names from `locals.tf`, the `resource_names` output),
+1. `modules/**` and `adapters/**` (resources, names from `locals.tf`, outputs),
    `.github/workflows/*.yml` (jobs, `environment:`, which role each job assumes).
-2. `docs/adr/*.md` and `docs/requirements.md` (Architecture) for the intended design.
+2. `docs/adr/*.md` for the intended design.
 
 Anything in the ADR or PLAN but not in code yet is **planned**: draw it with the planned edge/border style and
 label it `(planned, Phase N)`. Never invent a service, name or flow. Use names (`sis-dev-gha-plan`), never
-account IDs, ARNs with IDs, or emails (D2).
+account IDs, ARNs with IDs, or emails.
 
 Pin the diagram to `git rev-parse --short HEAD` in the title block.
 
@@ -42,7 +42,7 @@ Pin the diagram to `git rev-parse --short HEAD` in the title block.
 - Labels: icon label = AWS name + resource name on two lines (`ECS service<br>sis-dev-app`); edge labels 1 to 3
   words, only when the flow is not obvious. When an edge enters an icon from below, put that icon's label on top
   (`verticalLabelPosition=top;verticalAlign=bottom;`) so the edge does not cut through it.
-- Title block top-left: `<b>ship-it-safely: <topic></b><br>Based on <commit> | <date>`. A small legend for
+- Title block top-left: `<b><repo name>: <topic></b><br>Based on <commit> | <date>`. A small legend for
   edge styles when more than one is used.
 
 ## 3. Icons and styles

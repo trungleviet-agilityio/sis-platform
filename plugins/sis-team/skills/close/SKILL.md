@@ -1,7 +1,8 @@
 ---
 name: close
-description: Close a phase (or one checkpoint of it) of the ship-it-safely lab after the user has run the checkpoint - record the results in the ADR, update the progress note (outside the repo) and the lessons log, and open the docs PR. Use as /sis-team:close <phase> [checkpoint letter].
+description: Close a phase (or one checkpoint of it) after the user has run the checkpoint - record the results in the ADR, update the progress note (outside the repo) and the lessons log, and open the docs PR. Use as /sis-team:close <phase> [checkpoint letter].
 argument-hint: <phase number> [checkpoint letter]
+disable-model-invocation: true
 ---
 
 # /sis-team:close
@@ -13,7 +14,7 @@ step as passed that the user or a run log has not shown.
 
 - The checkpoint steps are in the phase ADR (`docs/adr/NNNN-phase-<n>-*.md`, section "Checkpoint ...").
 - For each step, take the result from what the user reported, or read it yourself:
-  `gh run view <id> --repo trungleviet-agilityio/ship-it-safely --log` (counts such as "27 added",
+  `gh run view <id> --repo <owner>/<repo> --log` (counts such as "27 added",
   "27 destroyed"), `gh pr checks <pr>`, `gh pr view <pr> --json state,mergeCommit`.
 - Note what was **not** observed and why. A failure that was expected (a guard refusing by design) is a pass
   with a note.
@@ -39,7 +40,7 @@ replacing it, so a doc that changed under you fails loudly instead of being patc
 
 - `pre-commit run --files <changed files>` (gitleaks, account ID hook, end of file).
 - No account IDs, ARNs with IDs or emails; no em-dashes or en-dashes.
-- Commit `docs(progress): close phase <n> with checkpoint <x> results` (skill `pr-conventions`), push, and open
+- Commit `docs(progress): close phase <n> with checkpoint <x> results` (Conventional Commits), push, and open
   the PR with a `--body-file`: what the PR does, the results, the changes, and any PR that is now redundant.
 - Never merge it. Report the PR link, the open items added, and what the next phase or checkpoint needs from
   the user.
