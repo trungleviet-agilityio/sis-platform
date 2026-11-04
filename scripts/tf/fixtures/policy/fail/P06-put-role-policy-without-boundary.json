@@ -1,0 +1,20 @@
+{
+  "documents": [
+    {
+      "name": "P06-put-role-policy-without-boundary",
+      "policy": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Action": [
+              "iam:PutRolePolicy"
+            ],
+            "Resource": "arn:aws:iam::123456789012:role/sis-dev-app-exec"
+          }
+        ]
+      }
+    }
+  ],
+  "boundary_arn": "arn:aws:iam::123456789012:policy/sis-dev-workload-boundary"
+}

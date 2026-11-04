@@ -1,0 +1,22 @@
+{
+  "documents": [
+    {
+      "name": "P06-no-boundary-arn-given",
+      "policy": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Action": "iam:CreateRole",
+            "Resource": "arn:aws:iam::123456789012:role/sis-dev-app-*",
+            "Condition": {
+              "StringEquals": {
+                "iam:PermissionsBoundary": "arn:aws:iam::123456789012:policy/sis-dev-workload-boundary"
+              }
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

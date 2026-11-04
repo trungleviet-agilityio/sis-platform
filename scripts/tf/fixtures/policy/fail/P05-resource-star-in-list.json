@@ -1,0 +1,23 @@
+{
+  "documents": [
+    {
+      "name": "P05-resource-star-in-list",
+      "policy": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Action": [
+              "ecr:GetAuthorizationToken",
+              "lambda:InvokeFunction"
+            ],
+            "Resource": [
+              "*"
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "boundary_arn": "arn:aws:iam::123456789012:policy/sis-dev-workload-boundary"
+}

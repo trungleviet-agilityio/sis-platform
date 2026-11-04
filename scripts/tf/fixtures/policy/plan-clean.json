@@ -1,0 +1,28 @@
+{
+  "format_version": "1.2",
+  "resource_changes": [
+    {
+      "address": "module.apply_profile.aws_iam_policy.apply",
+      "type": "aws_iam_policy",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "after": {
+          "policy": "{\"Version\": \"2012-10-17\", \"Statement\": [{\"Effect\": \"Allow\", \"Action\": \"lambda:PublishVersion\", \"Resource\": \"arn:aws:lambda:ap-southeast-1:123456789012:function:sis-dev-app\"}]}"
+        },
+        "after_unknown": {}
+      }
+    },
+    {
+      "address": "aws_s3_bucket.x",
+      "type": "aws_s3_bucket",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "after": {}
+      }
+    }
+  ]
+}

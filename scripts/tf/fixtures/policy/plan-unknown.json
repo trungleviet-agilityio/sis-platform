@@ -1,0 +1,18 @@
+{
+  "format_version": "1.2",
+  "resource_changes": [
+    {
+      "address": "module.apply_profile.aws_iam_policy.apply",
+      "type": "aws_iam_policy",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "after": {},
+        "after_unknown": {
+          "policy": true
+        }
+      }
+    }
+  ]
+}

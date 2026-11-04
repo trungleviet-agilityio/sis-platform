@@ -37,3 +37,7 @@ validate-examples: require-intake ## Every valid example exits 0, every invalid 
 	@scripts/ci/validate-examples.sh
 
 check: lint test validate-examples ## Everything a PR must pass (CI job `check`)
+
+.PHONY: tf-check
+tf-check: ## Offline Terraform checks for modules/: fmt, validate, tests, tflint, README, policy.py (no AWS)
+	scripts/tf/check.sh

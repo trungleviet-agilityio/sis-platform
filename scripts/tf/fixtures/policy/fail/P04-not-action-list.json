@@ -1,0 +1,21 @@
+{
+  "documents": [
+    {
+      "name": "P04-not-action-list",
+      "policy": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "NotAction": [
+              "iam:*",
+              "sts:*"
+            ],
+            "Resource": "arn:aws:s3:::example-bucket/*"
+          }
+        ]
+      }
+    }
+  ],
+  "boundary_arn": "arn:aws:iam::123456789012:policy/sis-dev-workload-boundary"
+}

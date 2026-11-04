@@ -1,0 +1,18 @@
+{
+  "format_version": "1.2",
+  "resource_changes": [
+    {
+      "address": "module.apply_profile.aws_iam_role_policy.apply",
+      "type": "aws_iam_role_policy",
+      "change": {
+        "actions": [
+          "create"
+        ],
+        "after": {
+          "policy": "{\"Version\": \"2012-10-17\", \"Statement\": [{\"Effect\": \"Allow\", \"Action\": \"iam:CreateRole\", \"Resource\": \"*\"}]}"
+        },
+        "after_unknown": {}
+      }
+    }
+  ]
+}

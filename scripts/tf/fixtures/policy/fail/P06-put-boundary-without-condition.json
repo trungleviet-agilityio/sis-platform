@@ -1,0 +1,18 @@
+{
+  "documents": [
+    {
+      "name": "P06-put-boundary-without-condition",
+      "policy": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Action": "iam:PutRolePermissionsBoundary",
+            "Resource": "arn:aws:iam::123456789012:role/sis-dev-app-exec"
+          }
+        ]
+      }
+    }
+  ],
+  "boundary_arn": "arn:aws:iam::123456789012:policy/sis-dev-workload-boundary"
+}
