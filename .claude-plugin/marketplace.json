@@ -9,6 +9,11 @@
       "name": "sis-intake",
       "source": "./intake",
       "description": "Intake interview that turns a product idea into a validated platform.yaml manifest"
+    },
+    {
+      "name": "sis-team",
+      "source": "./plugins/sis-team",
+      "description": "Plan, build and verify agent team with a PreToolUse guard that keeps Claude away from apply, merge, dispatch and secrets"
     }
   ]
 }
