@@ -37,6 +37,8 @@ CLOSURE = """# closure fixture
 :(glob)scripts/aws/**
 :(glob)scripts/lib.sh
 :(glob)scripts/tf/policy.py
+:(glob)intake/sis_intake/**
+:(exclude,glob)intake/sis_intake/__init__.py
 """
 
 PLUGIN = '{"name": "%s", "version": "%s"}\n'
@@ -104,6 +106,7 @@ class Repo:
         self.write("scripts/tf/test_policy.py", "# test, outside the closure\n")
         self.write(".github/workflows/reusable-terraform-apply.yml", "name: apply\n")
         self.write("docs/readme.md", "docs\n")
+        self.write("intake/sis_intake/rules.py", "RULES = 1\n")
         self.bump_versions(version)
         return self.commit("seed")
 

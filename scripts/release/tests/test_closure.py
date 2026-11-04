@@ -6,6 +6,7 @@ scripts/release/closure.txt. Standard library only, Python 3.9 or later:
 
 from __future__ import annotations
 
+import ast
 import json
 import shutil
 import subprocess  # noqa: S404  (the guard and the validator are run as a workflow would)
@@ -82,6 +83,23 @@ class ClosureComputation(unittest.TestCase):
         self.repo.write("scripts/aws/helper.sh", "# helper v2\n")
         self.assertEqual(self.repo.commit("helper"), self.sha())
 
+    def test_an_excluded_file_does_not_move_it(self) -> None:
+        self.repo.write("intake/sis_intake/__init__.py", helpers.INIT % "9.9.9")
+        self.repo.commit("version bump")
+        self.assertEqual(self.sha(), self.first)
+
+    def test_a_sibling_of_the_excluded_file_moves_it(self) -> None:
+        self.repo.write("intake/sis_intake/rules.py", "RULES = 2\n")
+        self.assertEqual(self.repo.commit("rules"), self.sha())
+
+    def test_changed_paths_skip_the_excluded_file(self) -> None:
+        before = self.repo.head()
+        self.repo.write("intake/sis_intake/__init__.py", helpers.INIT % "9.9.9")
+        self.repo.write("intake/sis_intake/rules.py", "RULES = 3\n")
+        self.repo.commit("both")
+        changed = closure.changed_paths(str(self.repo.path), before, "HEAD", self.specs)
+        self.assertEqual(changed, ["intake/sis_intake/rules.py"])
+
     def test_a_rename_moves_it_and_lists_both_paths(self) -> None:
         before = self.repo.head()
         self.repo.move("scripts/platform/tool.py", "scripts/platform/renamed.py")
@@ -117,7 +135,7 @@ class RealClosureFile(unittest.TestCase):
 
     def test_every_pathspec_is_a_glob_pathspec(self) -> None:
         for spec in self.specs:
-            self.assertTrue(spec.startswith(":(glob)"), spec)
+            self.assertTrue(spec.startswith((":(glob)", ":(exclude,glob)")), spec)
 
     def test_closure_lists_itself(self) -> None:
         self.assertIn("scripts/release/closure.txt", self.covered())
@@ -146,6 +164,44 @@ class RealClosureFile(unittest.TestCase):
         ):
             self.assertIn(path, covered)
 
+    def test_the_version_file_is_excluded_and_the_rest_of_the_package_is_not(self) -> None:
+        covered = self.covered()
+        self.assertNotIn("intake/sis_intake/__init__.py", covered)
+        self.assertIn("intake/sis_intake/rules.py", covered)
+        self.assertIn(":(exclude,glob)intake/sis_intake/__init__.py", self.specs)
+
+    def test_the_excluded_version_file_holds_only_a_docstring_and_the_version(self) -> None:
+        """No executable code may live outside the closure (L2, L4)."""
+        path = REPO_ROOT / "intake" / "sis_intake" / "__init__.py"
+        body = ast.parse(path.read_text(encoding="utf-8")).body
+        self.assertTrue(body, "empty file")
+        if isinstance(body[0], ast.Expr) and isinstance(
+            getattr(body[0], "value", None), ast.Constant
+        ):
+            self.assertIsInstance(body[0].value.value, str, "first statement must be the docstring")  # type: ignore[attr-defined]
+            body = body[1:]
+        self.assertEqual(len(body), 1, "only the __version__ assignment may follow the docstring")
+        node = body[0]
+        self.assertIsInstance(node, ast.Assign)
+        assert isinstance(node, ast.Assign)  # noqa: S101  (narrow for the type checker)
+        self.assertEqual([getattr(t, "id", None) for t in node.targets], ["__version__"])
+        self.assertIsInstance(node.value, ast.Constant)
+        self.assertRegex(str(getattr(node.value, "value", "")), r"^\d+\.\d+\.\d+$")
+
+    def test_adding_code_to_the_version_file_would_fail_the_shape_check(self) -> None:
+        for source in (
+            '"""d."""\nimport os\n__version__ = "0.2.0"\n',
+            '"""d."""\n__version__ = "0.2.0"\nX = 1\n',
+            '"""d."""\n__version__ = os.environ["V"]\n',
+        ):
+            body = ast.parse(source).body[1:]
+            ok = (
+                len(body) == 1
+                and isinstance(body[0], ast.Assign)
+                and isinstance(body[0].value, ast.Constant)
+            )
+            self.assertFalse(ok, source)
+
     def test_tests_docs_and_the_rule_table_are_outside(self) -> None:
         covered = self.covered()
         for path in (
@@ -167,7 +223,7 @@ class RealClosureFile(unittest.TestCase):
     def test_every_pathspec_matches_a_tracked_file_unless_it_is_a_future_path(self) -> None:
         future = {":(glob)scripts/aws/**", ":(glob).github/workflows/reusable-*.yml"}
         for spec in self.specs:
-            if spec not in future:
+            if spec not in future and not spec.startswith(":(exclude"):
                 self.assertTrue(closure.tracked_files(str(REPO_ROOT), [spec]), spec)
 
     def test_validator_runs_from_the_closure_files_alone(self) -> None:

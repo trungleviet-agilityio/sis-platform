@@ -25,6 +25,9 @@
 
 # Validator runtime: code, schema and the three rule data files (not questions.json, tests or the README)
 :(glob)intake/sis_intake/**
+# The version file is the one file every release edits (L4), so it stays out. It may hold only a
+# docstring and the __version__ assignment; a test (test_closure.py) enforces that with ast.
+:(exclude,glob)intake/sis_intake/__init__.py
 :(glob)intake/schema/**
 :(glob)intake/rules/compat.json
 :(glob)intake/rules/defaults.json

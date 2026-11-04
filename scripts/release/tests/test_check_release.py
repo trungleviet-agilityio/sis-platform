@@ -80,6 +80,21 @@ class WorkflowShaMovement(ReleaseCase):
         self.assertIn("  scripts/release/closure.txt", out)
         self.assertIn("moves workflow_sha", err)
 
+    def test_readme_change_plus_version_bump_as_a_patch_passes(self) -> None:
+        self.ship("0.1.1", "README.md")  # ship() also bumps intake/sis_intake/__init__.py
+        rc, out, err = self.release("v0.1.1")
+        self.assertEqual((rc, err), (0, ""))
+        self.assertIn("workflow_sha moved: no", out)
+        self.assertIn("closure paths changed: none", out)
+
+    def test_code_change_in_the_validator_as_a_patch_fails(self) -> None:
+        self.ship("0.1.1", "intake/sis_intake/rules.py")
+        rc, out, err = self.release("v0.1.1")
+        self.assertEqual(rc, 1)
+        self.assertIn("  intake/sis_intake/rules.py", out)
+        self.assertNotIn("__init__.py", out)
+        self.assertIn("moves workflow_sha", err)
+
     def test_minor_release_may_move_it(self) -> None:
         self.ship("0.2.0", "scripts/platform/tool.py")
         rc, out, err = self.release("v0.2.0")
