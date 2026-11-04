@@ -591,9 +591,9 @@ they are released); a consumer can vendor platform code through local paths; a t
 sis-platform at another SHA is invisible to L3 (IAM `job_workflow_ref`, O9, is the enforcement); tag integrity relies
 on the immutable tag ruleset.
 
-## Amendment C (2026-11-04, proposed): decisions from the 1f-2 build and verify
+## Amendment C (2026-11-04, accepted): decisions from the 1f-2 build and verify
 
-- Status: proposed (owner to accept with the 1f-2 PR)
+- Status: accepted (owner, 2026-11-04)
 - Source: the 1f-2 build, its peer review, and the wave 3 verify (e2e offline replay of every `run:` step,
   reviewer, security review twice, code-simplifier).
 
@@ -641,3 +641,4 @@ list (step 8); the PyYAML wheel hash on `ubuntu-24.04`.
 | 2026-11-04 | Amendment A: decisions from the wave 1 build and verify (accepted by the owner) |
 | 2026-11-04 | Amendment B (proposed): decisions from the wave 2 build and verify |
 | 2026-11-04 | Amendment C (proposed): decisions from the 1f-2 build and verify |
+| 2026-11-04 | Amendment C accepted by the owner |
