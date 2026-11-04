@@ -8,6 +8,8 @@ Run: python3 -m unittest discover -s plugins/sis-team/scripts -p 'test_*.py'
 
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import os
 import subprocess
@@ -15,8 +17,12 @@ import sys
 import tempfile
 import unittest
 from collections.abc import Mapping
+from unittest import mock
 
-GUARD = os.path.join(os.path.dirname(os.path.abspath(__file__)), "guard.py")
+HERE = os.path.dirname(os.path.abspath(__file__))
+GUARD = os.path.join(HERE, "guard.py")
+sys.path.insert(0, HERE)
+import guard  # noqa: E402  # in-process tests of the helpers
 
 
 def run(event: Mapping[str, object]) -> subprocess.CompletedProcess[str]:
@@ -302,6 +308,62 @@ class PathScope(unittest.TestCase):
                 self.assertEqual(done.returncode, 2)
                 self.assertIn("sis-team guard blocked this call (rm -r outside the repo", done.stderr)
 
+    def test_rm_grammar_cannot_hide_a_recursive_delete(self) -> None:
+        for command in [
+            "FOO=1 rm -rf ~/x",
+            "env FOO=1 rm -rf ~/x",
+            "env -i rm -rf ~/x",
+            "nice -n 5 rm -rf ~/x",
+            "exec rm -rf ~/x",
+            "echo a & rm -rf ~/x",
+            "sleep 1 & rm -rf ~/x",
+            "for f in a; do rm -rf ~/$f; done",
+            "for f in a; do rm -rf ~/x; done",
+            "if true; then rm -rf ~/x; fi",
+            "{ rm -rf ~/x; }",
+            "( rm -rf ~/x )",
+            "! rm -rf ~/x",
+            "bash -c 'rm -rf /tmp/x'",
+            "eval 'rm -rf /tmp/x'",
+            "echo $(rm -rf /tmp/x)",
+            'echo "$(rm -rf /tmp/x)"',
+            "echo `rm -rf /tmp/x`",
+            "rm -rf $(echo /tmp/x)",
+            "/bin/rm -rf /tmp/x",
+        ]:
+            with self.subTest(command=command):
+                done = bash_run(command, cwd=self.root)
+                self.assertEqual(done.returncode, 2)
+                self.assertIn(f"sis-team guard blocked this call ({RM_LABEL}", done.stderr)
+
+    def test_xargs_and_find_deletes_are_scoped(self) -> None:
+        for command, label in [
+            ("xargs rm -rf <<< ~/x", f"{RM_LABEL} (xargs input)"),
+            ("ls | xargs -I{} rm -rf ~/{}", f"{RM_LABEL} (xargs input)"),
+            ("ls | xargs -n1 rm -r", f"{RM_LABEL} (xargs input)"),
+            ("find ~/x -delete", f"{RM_LABEL} (find ~/x)"),
+            ("find ~/x -exec rm -rf {} +", f"{RM_LABEL} (find ~/x)"),
+            ("find /tmp -name x -delete", f"{RM_LABEL} (find /tmp)"),
+            ("find ../other -delete", f"{RM_LABEL} (find ../other)"),
+        ]:
+            with self.subTest(command=command):
+                done = bash_run(command, cwd=self.root)
+                self.assertEqual(done.returncode, 2)
+                self.assertIn(f"sis-team guard blocked this call ({label}", done.stderr)
+        for command in [
+            "find . -name '*.pyc' -delete",
+            "find sub -exec rm -rf {} +",
+            "find /tmp -name x",
+            "ls | xargs echo",
+            "ls | xargs rm -f",
+            "FOO=1 rm -rf build",
+            "git commit -m 'rm -rf /tmp/x'",
+        ]:
+            with self.subTest(command=command):
+                done = bash_run(command, cwd=self.root)
+                self.assertEqual(done.returncode, 0, done.stderr)
+                self.assertEqual(done.stderr, "")
+
     def test_rm_inside_or_not_recursive_is_allowed(self) -> None:
         for command in [
             "rm -rf build",
@@ -319,6 +381,206 @@ class PathScope(unittest.TestCase):
                 done = bash_run(command, cwd=self.root)
                 self.assertEqual(done.returncode, 0)
                 self.assertEqual(done.stderr, "")
+
+
+RM_LABEL = "rm -r outside the repo"
+
+# Fix round 1 (peer review): grammar the first parser missed. (command, label) run in a repo root.
+GRAMMAR_BLOCKED = [
+    # nested shells and eval
+    ('bash -c "git push origin main"', "push to main"),
+    ("sh -c 'git push origin HEAD:main'", "push to main"),
+    ('zsh -c "gh pr merge 1"', "PR merge (the owner merges)"),
+    ('eval "terraform apply"', "terraform apply/destroy/import"),
+    ("bash -c 'bash -c \"gh pr merge 1\"'", "PR merge (the owner merges)"),
+    ("python3 -c \"import os; os.system('gh pr merge 1')\"", "PR merge (the owner merges)"),
+    ("python3 -c \"import os; os.system('git push origin main')\"", "push to main"),
+    ('echo "$(gh pr merge 1)"', "PR merge (the owner merges)"),
+    ("x=`gh pr merge 1`", "PR merge (the owner merges)"),
+    ("bash <<EOF\ngh pr merge 1\nEOF", "PR merge (the owner merges)"),
+    # prefixes and wrappers
+    ("env FOO=1 gh pr merge 1", "PR merge (the owner merges)"),
+    ("sudo -u root terraform apply", "terraform apply/destroy/import"),
+    ("if true; then gh pr merge 1; fi", "PR merge (the owner merges)"),
+    ("timeout 5 gh pr merge 1", "PR merge (the owner merges)"),
+    # quoting does not hide a verb
+    ("'gh' pr merge 1", "PR merge (the owner merges)"),
+    ('gh "pr" merge 1', "PR merge (the owner merges)"),
+    ("gh pr 'merge' 1", "PR merge (the owner merges)"),
+    ("gh -R o/r pr merge 1", "PR merge (the owner merges)"),
+    ("gh alias set m 'pr merge'", "gh alias or extension"),
+    ("gh extension install o/x", "gh alias or extension"),
+    ("gh auth status -t", "gh sign-in, scopes or token"),
+    ("gh auth status --show-token", "gh sign-in, scopes or token"),
+    # graphql must be one inline literal query without a mutation
+    ("gh api graphql -F query=@m.graphql", "gh api write"),
+    ("gh api graphql -f query=@m.graphql", "gh api write"),
+    ("gh api graphql --input m.json", "gh api write"),
+    ('gh api graphql -f query="$Q"', "gh api write"),
+    ("gh api graphql -f query=$(cat q.graphql)", "gh api write"),
+    ("gh api /graphql -f query=@q.graphql", "gh api write"),
+    ('gh api graphql -f query="mu""tation { x }"', "gh api write"),
+    ("gh api graphql -f owner=me", "gh api write"),
+    # push spellings
+    ("git push origin :feat", "git push delete refspec"),
+    ("git push origin heads/main", "push to main"),
+    ("git push origin HEAD:heads/master", "push to master"),
+    ("git push --repo=origin main", "push to main"),
+    ("git push -o ci.skip origin main", "push to main"),
+    ('git push origin "main"', "push to main"),
+    # empty quote pairs do not hide names or literals
+    ('cat .e""nv', "secret file"),
+    ('security find-generic-password -s "sis-board-""token" -w', "board token read"),
+    ("security find-generic-password -s sis-board-'token' -w", "board token read"),
+    ("echo AK''IAABCDEFGHIJKLMNOP", "credential literal (AWS access key ID)"),
+    ('env "GH_TOKEN"=x gh pr view 1', "inline GitHub token"),
+]
+
+# Quoted text and heredoc bodies are data, not commands.
+GRAMMAR_ALLOWED = [
+    'git commit -m "docs: mention gh pr merge is blocked"',
+    "git commit -m 'terraform apply and git push origin main are blocked'",
+    "git commit -F - <<'EOF'\nfeat: gh pr merge is blocked\n\nbody: terraform apply\nEOF",
+    'git commit -m "$(cat <<\'EOF\'\nfeat: x\n\nbody mentions gh api -X POST\nEOF\n)"',
+    'echo "gh pr merge"',
+    'gh pr comment 1 --body "please do not gh pr merge yet"',
+    "gh auth status",
+    "gh pr view 1 --repo o/r",
+    "gh -R o/r pr view 1",
+    "python3 -c 'print(1)'",
+    "bash -c 'echo hi'",
+    "git push origin feat:feat2",
+    "git push -o ci.skip origin feat/x",
+    "git push origin heads/feat/x",
+]
+
+
+class GrammarBlocked(unittest.TestCase):
+    def test_blocks(self) -> None:
+        with tempfile.TemporaryDirectory() as repo:
+            subprocess.run(["git", "init", "-q", "-b", "feat", repo], check=True)  # noqa: S603,S607
+            for command, label in GRAMMAR_BLOCKED:
+                with self.subTest(command=command):
+                    done = bash_run(command, cwd=repo)
+                    self.assertEqual(done.returncode, 2)
+                    self.assertIn(f"sis-team guard blocked this call ({label}", done.stderr)
+
+    def test_allows(self) -> None:
+        with tempfile.TemporaryDirectory() as repo:
+            subprocess.run(["git", "init", "-q", "-b", "feat", repo], check=True)  # noqa: S603,S607
+            for command in GRAMMAR_ALLOWED:
+                with self.subTest(command=command):
+                    done = bash_run(command, cwd=repo)
+                    self.assertEqual(done.returncode, 0, done.stderr)
+                    self.assertEqual(done.stderr, "")
+
+    def test_push_after_cd_sees_the_new_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as base:
+            repo = os.path.join(base, "r")
+            elsewhere = os.path.join(base, "e")
+            os.makedirs(elsewhere)
+            subprocess.run(["git", "init", "-q", "-b", "main", repo], check=True)  # noqa: S603,S607
+            done = bash_run(f"cd {repo} && git push origin HEAD", cwd=elsewhere)
+            self.assertEqual(done.returncode, 2)
+            self.assertIn("(push to main", done.stderr)
+            done = bash_run("git -C ../r push origin HEAD", cwd=elsewhere)
+            self.assertEqual(done.returncode, 2)
+
+
+class FailClosed(unittest.TestCase):
+    def run_main(self, event: Mapping[str, object]) -> tuple[int, str]:
+        err = io.StringIO()
+        with mock.patch("sys.stdin", io.StringIO(json.dumps(event))):
+            with contextlib.redirect_stderr(err):
+                code = guard.main()
+        return code, err.getvalue()
+
+    def test_error_blocks_bash_and_write_tools(self) -> None:
+        bash_event = {"tool_name": "Bash", "tool_input": {"command": "ls"}, "cwd": ""}
+        with mock.patch.object(guard, "check_bash", side_effect=RuntimeError("boom")):
+            code, msg = self.run_main(bash_event)
+        self.assertEqual(code, 2)
+        self.assertIn("sis-team guard blocked this call (guard error RuntimeError)", msg)
+        write_event = {"tool_name": "Write", "tool_input": {"file_path": "a"}, "cwd": ""}
+        with mock.patch.object(guard, "check_file_tool", side_effect=ValueError("boom")):
+            code, msg = self.run_main(write_event)
+        self.assertEqual(code, 2)
+        self.assertIn("(guard error ValueError)", msg)
+
+    def test_error_in_a_read_tool_does_not_block(self) -> None:
+        read_event = {"tool_name": "Read", "tool_input": {"file_path": "a"}, "cwd": ""}
+        with mock.patch.object(guard, "check_file_tool", side_effect=ValueError("boom")):
+            code, msg = self.run_main(read_event)
+        self.assertEqual(code, 0)
+        self.assertEqual(msg, "")
+
+
+class ScratchAndRoots(unittest.TestCase):
+    def test_scratch_root_accepts_a_private_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as base:
+            path = os.path.join(base, "claude-1")
+            os.mkdir(path, 0o700)
+            self.assertEqual(guard.scratch_root(path), os.path.realpath(path))
+
+    def test_scratch_root_refuses_unsafe_directories(self) -> None:
+        with tempfile.TemporaryDirectory() as base:
+            wide = os.path.join(base, "wide")
+            os.mkdir(wide)
+            os.chmod(wide, 0o777)  # noqa: S103  # the unsafe case under test
+            group = os.path.join(base, "group")
+            os.mkdir(group)
+            os.chmod(group, 0o770)
+            real = os.path.join(base, "real")
+            os.mkdir(real, 0o700)
+            link = os.path.join(base, "link")
+            os.symlink(real, link)
+            mine = os.path.join(base, "mine")
+            os.mkdir(mine, 0o700)
+            for path in (wide, group, link, os.path.join(base, "missing")):
+                with self.subTest(path=path):
+                    self.assertIsNone(guard.scratch_root(path))
+            with mock.patch("os.getuid", return_value=os.getuid() + 1):
+                self.assertIsNone(guard.scratch_root(mine))  # wrong owner
+
+    def test_scratch_parent_is_allowed_other_temp_dirs_are_not(self) -> None:
+        with tempfile.TemporaryDirectory() as base:
+            scratch = os.path.join(base, "claude-1")
+            os.mkdir(scratch, 0o700)
+            repo = os.path.join(base, "repo")
+            subprocess.run(["git", "init", "-q", repo], check=True)  # noqa: S603,S607
+            real = os.path.realpath(scratch)
+            with mock.patch.object(guard, "scratch_root", return_value=real):
+                roots = guard.allowed_roots(repo)
+                self.assertIn(real, roots)
+                path = os.path.join(real, "session", "note.md")
+                self.assertTrue(guard.inside(path, roots))
+                self.assertFalse(guard.inside(real, roots))  # the root itself is not deletable
+                self.assertFalse(guard.inside(os.path.join(base, "other", "f"), roots))
+        done = write("Write", "/private/tmp/other/f.txt", "/")
+        self.assertEqual(done.returncode, 2)
+        self.assertIn("write outside the repo", done.stderr)
+
+    def test_extra_roots_refuse_broad_directories(self) -> None:
+        home = os.path.realpath(os.path.expanduser("~"))
+        for value in ("/", home, "/tmp", "/private/tmp", "~"):  # noqa: S108
+            with self.subTest(value=value), mock.patch.dict(os.environ, {"SIS_GUARD_EXTRA_ROOTS": value}):
+                self.assertEqual(guard.extra_roots(), [])
+        with tempfile.TemporaryDirectory() as base:
+            with mock.patch.dict(os.environ, {"SIS_GUARD_EXTRA_ROOTS": base}):
+                self.assertEqual(guard.extra_roots(), [os.path.realpath(base)])
+
+    def test_no_repo_in_home_or_root_gives_no_root(self) -> None:
+        with tempfile.TemporaryDirectory() as base:
+            fake_home = os.path.realpath(base)
+            failed = subprocess.CompletedProcess([], 128, "", "")
+            run_patch = mock.patch.object(guard.subprocess, "run", return_value=failed)
+            home_patch = mock.patch.object(guard, "_norm_home", return_value=fake_home)
+            with run_patch, home_patch:
+                self.assertEqual(guard.repo_root(fake_home), "")
+                self.assertEqual(guard.repo_root("/"), "")
+                sub = os.path.join(fake_home, "proj")
+                os.mkdir(sub)
+                self.assertEqual(guard.repo_root(sub), os.path.realpath(sub))
 
 
 class FileTools(unittest.TestCase):

@@ -53,7 +53,7 @@ def main() -> int:
         description = fields.get("description", "")
         phase_match = re.match(r"(\w+)-phase", description)
         phase = phase_match.group(1).capitalize() if phase_match else "?"
-        # Keep the sentences that say what the agent does: drop the "<Phase>-phase ... lab" lead-in, the
+        # Keep the sentences that say what the agent does: drop the first "<Phase>-phase ..." sentence, the
         # "Read-only" note (the Access column shows it) and "Use from/as ..." routing hints.
         sentences = re.split(r"(?<=\.)\s+(?=[A-Z])", description)[1:]
         kept = [s for s in sentences if not s.startswith(("Read-only", "Use from", "Use as"))]

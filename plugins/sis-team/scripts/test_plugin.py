@@ -141,7 +141,7 @@ class Hygiene(unittest.TestCase):
                 text = fh.read()
             with self.subTest(file=os.path.relpath(path, ROOT)):
                 self.assertNotRegex(text, r"(?i)ship-it-safely lab")
-                self.assertNotRegex(text, r"(?i)\bthe lab\b")
+                self.assertNotRegex(text, r"(?i)\blab\b")
 
     def test_no_dashes(self) -> None:
         for path in plugin_files():

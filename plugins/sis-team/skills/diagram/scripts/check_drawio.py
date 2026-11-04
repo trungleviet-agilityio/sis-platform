@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check .drawio files before export: structure, icon names and lab rules. Stdlib only.
+"""Check .drawio files before export: structure, icon names and the diagram rules. Stdlib only.
 
 Usage: check_drawio.py <file.drawio> [...]
 Exit 1 and one line per problem when anything fails.

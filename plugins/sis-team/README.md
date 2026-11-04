@@ -15,6 +15,12 @@ risky steps. It blocks:
   allowed with `SIS_GUARD_EXTRA_ROOTS`, a `:` separated list);
 - a Bash command that reads the `sis-board-token` Keychain item or sets `GH_TOKEN`/`GITHUB_TOKEN` inline.
 
+The guard is quote and shell aware: it recurses into `bash -c`, `eval`, `python -c`, `$(...)` and `xargs`,
+ignores quoted text and heredoc bodies, and fails closed (exit 2) on an internal error. `Edit`/`Write` also
+stay allowed in `/tmp/claude-<uid>` (the Claude scratchpad parent) when that directory is private to the user.
+Edit and Write on the guard itself and on `.claude/settings.json` are allowed on purpose (ADR 0002 S7,
+accepted): sessions load the guard from the last tag and the owner reviews every PR.
+
 Some guard ideas are adapted from super-board (https://github.com/EricTechPro/super-board, MIT). Tests:
 `python3 -m unittest discover -s plugins/sis-team/scripts -p 'test_*.py'` (run by `make test`).
 
