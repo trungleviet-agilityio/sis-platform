@@ -14,16 +14,17 @@ repos:
       - id: detect-private-key
 
   # No AWS account ID in git. gitleaks does not look for them. The AWS doc example ID and repeated-digit
-  # placeholders are allowed. intake/examples/invalid/ holds the deliberate 12-digit ID for rule V10.
+  # placeholders are allowed. Also matches the hyphenated spelling (the 4-4-4 form of the doc
+  # example is allowed). Only intake/examples/invalid/account-id.yaml holds a deliberate ID, for rule V10.
   - repo: local
     hooks:
       - id: no-aws-account-id
         name: no bare 12-digit AWS account ID
         language: pygrep
         # Alphanumeric boundaries: a digit run inside a 40-hex SHA pin is bounded by letters or digits.
-        entry: '(?<![0-9A-Za-z])(?!123456789012|111111111111|222222222222)[0-9]{12}(?![0-9A-Za-z])'
+        entry: '(?<![0-9A-Za-z])(?!123456789012|111111111111|222222222222|1234-5678-9012)([0-9]{12}|[0-9]{4}-[0-9]{4}-[0-9]{4})(?![0-9A-Za-z])'
         types: [text]
-        exclude: ^intake/examples/invalid/
+        exclude: ^intake/examples/invalid/account-id\.yaml$
 
   # Workflow security audits (offline). The guard fixtures are deliberately bad workflows.
   - repo: https://github.com/zizmorcore/zizmor-pre-commit
@@ -41,15 +42,17 @@ repos:
       - id: ruff-format
         files: ^(intake/|scripts/).*\.py$
 
-  - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: ad26ebfa797fcb9b8f83275937c1c1d6e126719c # frozen: v2.4.1
+  # mypy runs from the hash-locked CI venv (make venv), so mypy and types-PyYAML are hash-locked in
+  # scripts/ci/requirements.txt; pre-commit additional_dependencies cannot carry hashes (ADR 0002 H7).
+  - repo: local
     hooks:
       - id: mypy
+        name: mypy (strict, pyproject.toml)
+        language: system
+        entry: .venv-ci/bin/mypy
         # Check the files listed in pyproject.toml as one program, with its strict settings.
-        args: []
         pass_filenames: false
         files: ^(intake/.*\.py|pyproject\.toml)$
-        additional_dependencies: [types-PyYAML==6.0.12.20261103]
 
   # Cross-check the schema with a real JSON Schema library (ADR 0001 Z4); the runtime never imports one.
   - repo: https://github.com/python-jsonschema/check-jsonschema
