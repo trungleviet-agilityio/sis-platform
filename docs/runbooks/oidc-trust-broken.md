@@ -28,13 +28,13 @@ unexpectedly passes. No secret values and no account IDs belong in this file or 
 | `workflow_sha` moved, bootstrap not re-applied | `platform.lock` `workflow_sha` vs the SHAs in the trust | Owner re-applies bootstrap with the new SHA in `trusted_workflow_shas` (O10), dev then prod |
 | Caller pinned a SHA that is not in `trusted_workflow_shas` | `python3 scripts/platform/check_lock.py --remote .` | Fix the pin or add the SHA through a reviewed PR |
 | `job_workflow_ref` format differs from the O9 template | Step 2 value | Patch release that pins the exact observed string; never a wildcard (O12) |
-| `environment` missing or wrong on the job | `sub` should read `repo:<owner>/<repo>:environment:<env>` | Set `environment` on apply and deploy jobs; plan jobs must not set it |
+| `environment` missing or wrong on the job | `sub` should read `repo:<owner>@<owner_id>/<repo>@<repo_id>:environment:<env>`, the immutable form with the numeric owner and repo IDs the module trusts; the O12 claims smoke output is the source of truth, copy nothing from this table | Set `environment` on apply and deploy jobs; plan jobs must not set it |
 | Wrong or empty `AWS_ACCOUNT_ID` | The first workflow step fails on an empty value | Fix the environment secret; if it does not resolve cross-owner, use the O13 fallback |
 | OIDC provider missing or replaced | `aws iam list-open-id-connect-providers` | Re-apply bootstrap; the provider has `prevent_destroy` |
 
 ## 4. Never do these
 
-- Do not widen the trust to a wildcard, to `StringLike`, or to a branch-only subject to "get green".
+- Never widen the `sub` to a name-only form (`repo:<owner>/<repo>:...`), a wildcard, `StringLike`, or a branch-only subject to "get green".
 - Do not attach `*` actions to a role as a workaround.
 - Do not `terraform import`, `state mv` or `state rm` from the agent session: the owner runs state commands.
 

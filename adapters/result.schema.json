@@ -12,8 +12,8 @@
   "properties": {
     "contract_version": {"const": 1},
     "verb": {"enum": ["deploy", "verify", "rollback", "status"]},
-    "env": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,30}$"},
-    "release_id": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,30}-[0-9a-f]{12}$"},
+    "env": {"type": "string", "pattern": "^[a-z][a-z0-9]{1,7}$"},
+    "release_id": {"type": "string", "pattern": "^[a-z][a-z0-9]{1,7}-[0-9a-f]{12}$"},
     "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
     "sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
     "live_ref": {"type": "string"},

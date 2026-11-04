@@ -20,6 +20,7 @@ ROOT = os.path.dirname(ADAPTERS)
 sys.path.insert(0, ADAPTERS)
 
 from contract_check import EXIT_STATES, STATES, VERBS, check_line, release_id  # noqa: E402
+from contract_check import load_schema as load  # noqa: E402
 from sis_intake import schema as z4  # noqa: E402
 
 JSON_TYPES = {"string", "integer", "number", "boolean", "array", "object", "null"}
@@ -27,11 +28,6 @@ ALLOWED_SCHEMA_URI = "https://json-schema.org/draft/2020-12/schema"
 
 DIGEST = "sha256:" + "ab12cd34ef56" * 5 + "ab12"
 SHA = "0123456789abcdef0123456789abcdef01234567"
-
-
-def load(name):
-    with open(os.path.join(ADAPTERS, name), encoding="utf-8") as fh:
-        return json.load(fh)
 
 
 def manifest_schema():
@@ -250,14 +246,14 @@ class ResultInvalidTests(unittest.TestCase):
                     doc = line(state=state, traffic={"candidate_percent": pct})
                     self.assertEqual(check_line(doc), [])
 
-    def test_env_pattern_accepts_hyphens_like_account_labels(self):
-        for env in ("dev", "prod-eu", "a"):
-            doc = line(env=env, release_id=release_id(env, DIGEST))
+    def test_env_pattern_matches_intake_and_module(self):
+        # Same shape as project.prefix in the manifest: 2 to 8 chars, no hyphen.
+        for env in ("dev", "prod2", "ab", "abcdefgh"):
             with self.subTest(env=env):
-                self.assertEqual(check_line(doc), [])
-        for env in ("Dev", "-dev", "1dev", "d_ev"):
+                self.assertEqual(check_line(line(env=env, release_id=release_id(env, DIGEST))), [])
+        for env in ("pre-prod", "a", "abcdefghi", "Dev", "1dev", "d_ev"):
             with self.subTest(env=env):
-                self.assertTrue(check_line(line(env=env, release_id=env + "-" + DIGEST[7:19])))
+                self.assertTrue(check_line(line(env=env, release_id=release_id(env, DIGEST))))
 
     def test_not_an_object(self):
         self.assertTrue(check_line([line()]))

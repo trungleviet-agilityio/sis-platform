@@ -59,7 +59,7 @@ Exactly one JSON line on stdout, validated by `result.schema.json`. Logs go to s
 | `env`, `release_id`, `digest`, `sha` | Echo of the inputs |
 | `live_ref` | Runtime-specific reference of what serves traffic (Lambda version, task definition revision, ASG revision, rollout revision). Empty string if none |
 | `candidate_ref` | Same, for the release being rolled out. Empty string if none |
-| `traffic.candidate_percent` | Integer 0 to 100 sent to the candidate. `env` and `release_id` accept hyphens, like account labels (1g addition) |
+| `traffic.candidate_percent` | Integer 0 to 100 sent to the candidate. `env` is 2 to 8 lowercase letters or digits starting with a letter, no hyphen, the same shape as `project.prefix` in the manifest and the module; `release_id` follows (1g addition) |
 | `state` | See below |
 | `endpoint` | URL of the front door, or empty string |
 | `message` | One human sentence, no secrets, no account IDs |
