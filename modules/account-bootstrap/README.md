@@ -20,10 +20,10 @@ header names its source.
   - the nonprod plan role trusts the `pull_request` subject (O14); the prod plan role trusts only `ref:refs/heads/main`
     and `environment:<env>` subjects, never a pull request.
 - Plan role: the managed `ReadOnlyAccess` policy plus denies on secret values, SSM parameter reads, every
-  `kms:Decrypt` and S3 object reads outside the state keys. Its only write is the env's `.tflock` object. Accepted
+  `kms:Decrypt` and S3 object reads outside the state keys. The managed policy is not purely read-only, so the denies include the data-plane reads it grants (SQS receive, DynamoDB reads and PartiQL, log queries, Kinesis records, `s3express:CreateSession` and so on). Its only write is the env's `.tflock` object. Accepted
   (O14): the data-returning reads that remain are readable by a same-repo PR author in nonprod, and the nonprod plan
   role can write the lock object (lock interference).
-- Guardrails G1 to G8 are attached to all three roles: secret values, SSM parameters, role chaining, IAM writes and
+- Guardrails G1 to G8 are attached to all three roles, and G9 (escalation: role writes only with the workload boundary, no boundary removal, `iam:PassRole` only with a service) to apply and deploy, in two managed policies under the 6144 character limit: secret values, SSM parameters, role chaining, IAM writes and
   `iam:PassRole` on the gha roles, boundary and OIDC provider, the bootstrap state key, the audit trail and alert
   resources, the state bucket's own configuration (G7) and the app ECR repository's administration (G8).
 - ECR repository `<prefix>-<env>-app`: immutable tags, scan on push, AES256, lifecycle (untagged expire after 14 days,
@@ -32,7 +32,7 @@ header names its source.
   `notify` SNS email topic (T7).
 - Detective baseline (T7): multi-region management-event trail, IAM Access Analyzer, GuardDuty only when
   `enable_guardduty` is set, and an EventBridge rule that mails the topic on a refused or unexpected
-  `AssumeRoleWithWebIdentity`.
+  `AssumeRoleWithWebIdentity`, and a rule that mails it every Access Analyzer finding.
 - Permissions boundary `<prefix>-<env>-workload-boundary`, output `workload_boundary_arn` (T11).
 
 ## Contract
@@ -86,7 +86,9 @@ No modules.
 | [aws_ce_anomaly_monitor.services](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/ce_anomaly_monitor) | resource |
 | [aws_ce_anomaly_subscription.notify](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/ce_anomaly_subscription) | resource |
 | [aws_cloudtrail.this](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/cloudtrail) | resource |
+| [aws_cloudwatch_event_rule.access_analyzer](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/cloudwatch_event_rule) | resource |
 | [aws_cloudwatch_event_rule.oidc_unexpected](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/cloudwatch_event_rule) | resource |
+| [aws_cloudwatch_event_target.access_analyzer](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/cloudwatch_event_target) | resource |
 | [aws_cloudwatch_event_target.notify](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/cloudwatch_event_target) | resource |
 | [aws_ecr_lifecycle_policy.app](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/ecr_lifecycle_policy) | resource |
 | [aws_ecr_repository.app](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/ecr_repository) | resource |
@@ -94,6 +96,7 @@ No modules.
 | [aws_guardduty_detector.this](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/guardduty_detector) | resource |
 | [aws_iam_openid_connect_provider.github](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_openid_connect_provider) | resource |
 | [aws_iam_policy.guardrails](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_policy) | resource |
+| [aws_iam_policy.guardrails_escalation](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_policy) | resource |
 | [aws_iam_policy.workload_boundary](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_policy) | resource |
 | [aws_iam_role.apply](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role) | resource |
 | [aws_iam_role.deploy](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role) | resource |
@@ -104,6 +107,7 @@ No modules.
 | [aws_iam_role_policy.deploy_composed](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role_policy) | resource |
 | [aws_iam_role_policy.plan](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role_policy) | resource |
 | [aws_iam_role_policy_attachment.guardrails](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role_policy_attachment) | resource |
+| [aws_iam_role_policy_attachment.guardrails_escalation](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role_policy_attachment) | resource |
 | [aws_iam_role_policy_attachment.plan_read_only](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role_policy_attachment) | resource |
 | [aws_s3_bucket.state](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/s3_bucket) | resource |
 | [aws_s3_bucket.trail](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/s3_bucket) | resource |
@@ -126,6 +130,7 @@ No modules.
 | [aws_iam_policy_document.apply_state](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) | data source |
 | [aws_iam_policy_document.deploy_base](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) | data source |
 | [aws_iam_policy_document.guardrails](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) | data source |
+| [aws_iam_policy_document.guardrails_escalation](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) | data source |
 | [aws_iam_policy_document.notify](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) | data source |
 | [aws_iam_policy_document.plan](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) | data source |
 | [aws_iam_policy_document.state_tls](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) | data source |

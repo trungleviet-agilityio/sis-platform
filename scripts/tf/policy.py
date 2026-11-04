@@ -15,7 +15,8 @@ Rules (a statement is checked when its Effect is Allow):
   P02 `iam:*`
   P03 `sts:AssumeRole*` (any action that grants an assume call)
   P04 NotAction or NotResource
-  P05 `Resource: "*"` for an action that is not on the no-resource-level-support allowlist
+  P05 `Resource: "*"` (or an ARN with a wildcard service or resource segment, `arn:*`,
+      `arn:aws:s3:*:*:*`) for an action that is not on the no-resource-level-support allowlist
   P06 iam:CreateRole, PutRolePolicy, AttachRolePolicy or PutRolePermissionsBoundary without the
       condition `iam:PermissionsBoundary` equal to the boundary ARN
   P07 iam:PassRole without an `iam:PassedToService` condition, or on a resource that is not a
@@ -132,6 +133,8 @@ ECR_ADMIN_ACTIONS = (
     "ecr:DeleteLifecyclePolicy",
     "ecr:PutImageTagMutability",
 )
+# The state bucket and the repository are built in the env region; Phase 1 allows one region (D21).
+DEFAULT_REGION = "ap-southeast-1"
 GHA_ROLE_SUFFIXES = ("plan", "apply", "deploy", "guardrails")
 POLICY_RESOURCE_TYPES = (
     "aws_iam_policy",
@@ -224,28 +227,37 @@ def _role_violations(resources: List[str], env_name: Optional[str]) -> List[str]
     return bad
 
 
-def _hits_state_bucket(resource: str, env_name: Optional[str], account: str) -> bool:
+def _is_star(resource: str) -> bool:
+    """`*`, or an ARN whose service or resource segment is a wildcard (`arn:*`, `arn:aws:s3:*:*:*`)."""
     if resource == "*":
+        return True
+    if not resource.startswith("arn:"):
+        return False
+    parts = resource.split(":", 5)
+    if len(parts) < 6:
+        return "*" in parts[1:]
+    return parts[2] == "*" or parts[5] == "*"
+
+
+def _hits_state_bucket(resource: str, env_name: Optional[str], account: str) -> bool:
+    if _is_star(resource):
         return True
     if not resource.startswith("arn:") or ":::" not in resource:
         return False
     bucket = resource.split(":::", 1)[1].split("/", 1)[0]
     if env_name is None:
-        return "tfstate" in bucket or bucket == "*"
-    sample = f"{env_name}-tfstate-{account}-ap-southeast-1-an"
-    return _glob_match(bucket, sample) or bucket.startswith(f"{env_name}-tfstate-")
+        return "tfstate" in bucket
+    concrete = f"arn:aws:s3:::{env_name}-tfstate-{account}-{DEFAULT_REGION}-an"
+    return _glob_match(resource, concrete) or _glob_match(resource, concrete + "/x")
 
 
-def _hits_ecr_repository(resource: str, env_name: Optional[str]) -> bool:
-    if resource == "*":
+def _hits_ecr_repository(resource: str, env_name: Optional[str], account: str) -> bool:
+    if _is_star(resource):
         return True
-    match = re.fullmatch(r"arn:[^:]*:ecr:[^:]*:[^:]*:repository/(.+)", resource)
-    if match is None:
-        return False
-    repo = match.group(1)
     if env_name is None:
-        return repo == "*" or repo.endswith("-app")
-    return _glob_match(repo, f"{env_name}-app")
+        return resource.startswith("arn:") and resource.endswith("-app")
+    concrete = f"arn:aws:ecr:{DEFAULT_REGION}:{account}:repository/{env_name}-app"
+    return _glob_match(resource, concrete)
 
 
 def lint_document(name: str, doc: Dict[str, Any], boundary_arn: Optional[str]) -> List[Finding]:
@@ -270,7 +282,7 @@ def lint_document(name: str, doc: Dict[str, Any], boundary_arn: Optional[str]) -
         if "NotAction" in stmt or "NotResource" in stmt:
             add("P04", "Allow with NotAction or NotResource")
 
-        if "*" in resources:
+        if any(_is_star(r) for r in resources):
             bad = [
                 a for a in actions if not any(_glob_match(ok, a) for ok in STAR_RESOURCE_ALLOWLIST)
             ]
@@ -339,7 +351,7 @@ def lint_document(name: str, doc: Dict[str, Any], boundary_arn: Optional[str]) -
         if bucket_admin and any(_hits_state_bucket(r, env_name, account) for r in resources):
             add("P11", "administration of the state bucket is allowed: " + ", ".join(bucket_admin))
         ecr_admin = [a for a in ECR_ADMIN_ACTIONS if _grants(actions, a)]
-        if ecr_admin and any(_hits_ecr_repository(r, env_name) for r in resources):
+        if ecr_admin and any(_hits_ecr_repository(r, env_name, account) for r in resources):
             add(
                 "P11",
                 "administration of the app ECR repository is allowed: " + ", ".join(ecr_admin),

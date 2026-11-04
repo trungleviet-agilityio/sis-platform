@@ -100,7 +100,7 @@ run "plan_role_denies_s3_reads_outside_state" {
     condition = anytrue([
       for s in data.aws_iam_policy_document.plan.statement : (
         s.sid == "DenyS3ReadsOutsideState" && s.effect == "Deny"
-        && toset(s.actions) == toset(["s3:GetObject", "s3:GetObjectVersion"])
+        && toset(s.actions) == toset(["s3:GetObject*"])
         && toset(s.not_resources) == toset([
           "arn:aws:s3:::sis-dev-tfstate-123456789012-ap-southeast-1-an/envs/dev/terraform.tfstate",
           "arn:aws:s3:::sis-dev-tfstate-123456789012-ap-southeast-1-an/envs/dev/terraform.tfstate.tflock",
@@ -153,8 +153,29 @@ run "plan_role_writes_only_the_lock_object" {
   assert {
     condition = toset([
       for s in data.aws_iam_policy_document.plan.statement : s.sid if s.effect == "Deny"
-    ]) == toset(["DenyS3ReadsOutsideState", "DenySecretValueReads", "DenyKmsDecrypt", "DenySsmParameterReads"])
-    error_message = "the explicit denies are secrets, SSM parameter reads, KMS decrypt and S3 reads outside the state keys"
+    ]) == toset(["DenyS3ReadsOutsideState", "DenySecretValueReads", "DenyKmsDecrypt", "DenySsmParameterReads", "DenyDataPlaneReads"])
+    error_message = "the explicit denies are secrets, SSM parameter reads, KMS decrypt, data plane reads and S3 reads outside the state keys"
+  }
+}
+
+run "plan_role_denies_the_data_plane_reads_of_read_only_access" {
+  command = plan
+
+  assert {
+    condition = anytrue([
+      for s in data.aws_iam_policy_document.plan.statement : (
+        s.sid == "DenyDataPlaneReads" && s.effect == "Deny"
+        && toset(s.resources) == toset(["*"])
+        && toset(s.actions) == toset([
+          "athena:GetQueryResults*", "codecommit:GitPull", "cognito-idp:AdminGet*", "config:Deliver*",
+          "dynamodb:BatchGetItem", "dynamodb:GetItem", "dynamodb:PartiQLSelect", "dynamodb:Query", "dynamodb:Scan",
+          "eks:AccessKubernetesApi", "kinesis:GetRecords", "kinesis:GetShardIterator",
+          "logs:FilterLogEvents", "logs:GetLogEvents", "logs:GetQueryResults", "logs:StartLiveTail", "logs:StartQuery",
+          "s3express:CreateSession", "sqs:Receive*",
+        ])
+      )
+    ])
+    error_message = "the plan role must deny the data plane actions that ReadOnlyAccess grants"
   }
 }
 

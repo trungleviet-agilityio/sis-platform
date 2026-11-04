@@ -1,6 +1,7 @@
 # Credit: adapted from ship-it-safely infra/terraform/bootstrap/iam_guardrails.tf (lab ADR 0007 S28, B16).
-# T4: guardrails G1 to G8 attached to the plan, apply and deploy roles. Action wildcards appear only in Deny
-# statements.
+# T4: guardrails G1 to G8 attached to the plan, apply and deploy roles, and G9 (escalation) to apply and deploy.
+# Action wildcards appear only in Deny statements. Two managed policies, because one is limited to 6144 characters.
+# The owner's admin identity carries none of them, so the bootstrap apply is unaffected.
 data "aws_iam_policy_document" "guardrails" {
   statement {
     sid    = "G1DenySecretValues"
@@ -10,6 +11,8 @@ data "aws_iam_policy_document" "guardrails" {
       "secretsmanager:BatchGetSecretValue",
       "secretsmanager:PutSecretValue",
       "secretsmanager:UpdateSecretVersionStage",
+      "secretsmanager:UpdateSecret",
+      "secretsmanager:PutResourcePolicy",
     ]
     resources = ["*"]
   }
@@ -105,11 +108,36 @@ data "aws_iam_policy_document" "guardrails" {
     resources = ["*"]
   }
 
+  # The rest of the detective baseline and the cost alarms: nobody changes, disables or deletes them from CI.
+  statement {
+    sid    = "G6DenyDetectiveBaseline"
+    effect = "Deny"
+    actions = [
+      "access-analyzer:Create*",
+      "access-analyzer:Update*",
+      "access-analyzer:Delete*",
+      "guardduty:Create*",
+      "guardduty:Update*",
+      "guardduty:Delete*",
+      "guardduty:Disable*",
+      "guardduty:Disassociate*",
+      "guardduty:Stop*",
+      "budgets:Modify*",
+      "budgets:Update*",
+      "budgets:Delete*",
+      "ce:UpdateAnomalyMonitor",
+      "ce:DeleteAnomalyMonitor",
+      "ce:UpdateAnomalySubscription",
+      "ce:DeleteAnomalySubscription",
+    ]
+    resources = ["*"]
+  }
+
   statement {
     sid       = "G6DenyAlertRule"
     effect    = "Deny"
     actions   = ["events:*"] # Deny only: widens protection
-    resources = [aws_cloudwatch_event_rule.oidc_unexpected.arn]
+    resources = concat([aws_cloudwatch_event_rule.oidc_unexpected.arn], aws_cloudwatch_event_rule.access_analyzer[*].arn)
   }
 
   statement {
@@ -125,6 +153,84 @@ data "aws_iam_policy_document" "guardrails" {
     actions   = ["s3:*"] # Deny only: widens protection
     resources = [local.trail_bucket_arn, "${local.trail_bucket_arn}/*"]
   }
+}
+
+# G9: the escalation rules of scripts/tf/policy.py, enforced in IAM. A role can only be created, given a policy or
+# given a boundary with the workload boundary attached, the boundary can never be removed, and PassRole always names
+# a service. StringNotEquals alone already matches a missing key; the Null statement states it. Attached to the apply
+# and deploy roles only: the plan role cannot write IAM at all.
+data "aws_iam_policy_document" "guardrails_escalation" {
+  statement {
+    sid    = "G9DenyRoleWritesWithOtherBoundary"
+    effect = "Deny"
+    actions = [
+      "iam:CreateRole",
+      "iam:PutRolePolicy",
+      "iam:AttachRolePolicy",
+      "iam:PutRolePermissionsBoundary",
+    ]
+    resources = ["${local.iam_arn}:role/*"]
+
+    condition {
+      test     = "StringNotEquals"
+      variable = "iam:PermissionsBoundary"
+      values   = [local.boundary_arn]
+    }
+  }
+
+  statement {
+    sid    = "G9DenyRoleWritesWithoutBoundary"
+    effect = "Deny"
+    actions = [
+      "iam:CreateRole",
+      "iam:PutRolePolicy",
+      "iam:AttachRolePolicy",
+      "iam:PutRolePermissionsBoundary",
+    ]
+    resources = ["${local.iam_arn}:role/*"]
+
+    condition {
+      test     = "Null"
+      variable = "iam:PermissionsBoundary"
+      values   = ["true"]
+    }
+  }
+
+  statement {
+    sid       = "G9DenyDeleteRoleBoundary"
+    effect    = "Deny"
+    actions   = ["iam:DeleteRolePermissionsBoundary"]
+    resources = ["*"]
+  }
+
+  statement {
+    sid       = "G9DenyPassRoleWithoutService"
+    effect    = "Deny"
+    actions   = ["iam:PassRole"]
+    resources = ["*"]
+
+    condition {
+      test     = "Null"
+      variable = "iam:PassedToService"
+      values   = ["true"]
+    }
+  }
+}
+
+resource "aws_iam_policy" "guardrails_escalation" {
+  name        = "${local.name}-gha-escalation"
+  description = "Escalation denies attached to the apply and deploy roles"
+  policy      = data.aws_iam_policy_document.guardrails_escalation.json
+}
+
+resource "aws_iam_role_policy_attachment" "guardrails_escalation" {
+  for_each = {
+    apply  = aws_iam_role.apply.name
+    deploy = aws_iam_role.deploy.name
+  }
+
+  role       = each.value
+  policy_arn = aws_iam_policy.guardrails_escalation.arn
 }
 
 resource "aws_iam_policy" "guardrails" {

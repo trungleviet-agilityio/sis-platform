@@ -250,6 +250,37 @@ run "access_analyzer_on_and_guardduty_off_by_default" {
   }
 }
 
+run "access_analyzer_findings_reach_the_notify_topic" {
+  command = plan
+
+  assert {
+    condition = (
+      aws_cloudwatch_event_rule.access_analyzer[0].name == "sis-dev-access-analyzer-finding"
+      && jsondecode(aws_cloudwatch_event_rule.access_analyzer[0].event_pattern).source == ["aws.access-analyzer"]
+      && jsondecode(aws_cloudwatch_event_rule.access_analyzer[0].event_pattern)["detail-type"] == ["Access Analyzer Finding"]
+    )
+    error_message = "a rule matches Access Analyzer findings"
+  }
+
+  assert {
+    condition     = aws_cloudwatch_event_target.access_analyzer[0].arn == "arn:aws:sns:ap-southeast-1:123456789012:sis-dev-notify"
+    error_message = "the rule targets the notify topic"
+  }
+}
+
+run "no_analyzer_rule_without_the_analyzer" {
+  command = plan
+
+  variables {
+    create_access_analyzer = false
+  }
+
+  assert {
+    condition     = length(aws_cloudwatch_event_rule.access_analyzer) == 0 && length(aws_cloudwatch_event_target.access_analyzer) == 0
+    error_message = "create_access_analyzer = false creates no finding rule"
+  }
+}
+
 run "flags_switch_the_baseline" {
   command = plan
 

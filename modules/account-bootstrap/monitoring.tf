@@ -184,6 +184,43 @@ resource "aws_guardduty_detector" "this" {
   enable = true
 }
 
+# Access Analyzer findings (external access to a role, bucket, key and so on) go to the notify topic as they appear.
+resource "aws_cloudwatch_event_rule" "access_analyzer" {
+  count = var.create_access_analyzer ? 1 : 0
+
+  name        = "${local.name}-access-analyzer-finding"
+  description = "IAM Access Analyzer reported a finding"
+
+  event_pattern = jsonencode({
+    source        = ["aws.access-analyzer"]
+    "detail-type" = ["Access Analyzer Finding"]
+    detail        = { status = ["ACTIVE"] }
+  })
+}
+
+resource "aws_cloudwatch_event_target" "access_analyzer" {
+  count = var.create_access_analyzer ? 1 : 0
+
+  rule = aws_cloudwatch_event_rule.access_analyzer[0].name
+  arn  = aws_sns_topic.notify.arn
+
+  input_transformer {
+    input_paths = {
+      resource = "$.detail.resource"
+      type     = "$.detail.resourceType"
+      public   = "$.detail.isPublic"
+      time     = "$.time"
+    }
+    input_template = <<-EOT
+      "IAM Access Analyzer finding from rule <aws.events.rule-name>: a resource can be reached from outside this account."
+      "Resource: <resource> (<type>)"
+      "Public: <public>"
+      "Time: <time>"
+      "Details: IAM Access Analyzer console, active findings."
+    EOT
+  }
+}
+
 # Notify topic (M10) and alert rule
 
 # No KMS: EventBridge cannot publish to a topic that uses the AWS-managed SNS key, and a CMK costs money.
@@ -206,7 +243,7 @@ data "aws_iam_policy_document" "notify" {
     condition {
       test     = "ArnEquals"
       variable = "aws:SourceArn"
-      values   = [aws_cloudwatch_event_rule.oidc_unexpected.arn]
+      values   = concat([aws_cloudwatch_event_rule.oidc_unexpected.arn], aws_cloudwatch_event_rule.access_analyzer[*].arn)
     }
   }
 

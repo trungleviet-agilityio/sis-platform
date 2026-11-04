@@ -52,7 +52,7 @@ The bootstrap module checks the first group (T8, cheap structural checks). `scri
 | P02 | No `Allow` with `iam:*` |
 | P03 | No `Allow` of `sts:AssumeRole*` (role chaining is also denied by guardrail G3) |
 | P04 | No `NotAction` or `NotResource` on an `Allow` statement |
-| P05 | `Resource: "*"` only for actions with no resource-level support (the allowlist in `policy.py`) |
+| P05 | `Resource: "*"` (or an ARN with a wildcard service or resource segment such as `arn:*` or `arn:aws:s3:*:*:*`) only for actions with no resource-level support (the allowlist in `policy.py`) |
 | P06 | `iam:CreateRole`, `iam:PutRolePolicy`, `iam:AttachRolePolicy`, `iam:PutRolePermissionsBoundary` only with the condition `iam:PermissionsBoundary` equal to the boundary ARN |
 | P07 | `iam:PassRole` only with an `iam:PassedToService` condition and only on `role/<prefix>-<env>-<literal>...`: never `-gha-*`, never a wildcard role name, never `Resource: "*"` |
 | P08 | No write to the boundary policy itself (policy create, delete, version and tag actions on its ARN) |
@@ -67,4 +67,4 @@ The bootstrap module checks the first group (T8, cheap structural checks). `scri
 for every workload role (Lambda execution role, ECS task and execution role): log writes for the env, image pull from
 the env repositories, and the env secrets. The apply profile may create a workload role only with
 `"permissions_boundary" = <boundary ARN>`, and its policy must carry the P06 condition, so a bad apply cannot mint an
-unbounded role. Guardrail G4 stops every CI role from editing the boundary, the gha roles and the OIDC provider.
+unbounded role. Guardrail G9 (attached to the apply and deploy roles) enforces P06, P07's service condition and P09 in IAM itself, so the profile cannot rely on the linter alone. Guardrail G4 stops every CI role from editing the boundary, the gha roles and the OIDC provider.

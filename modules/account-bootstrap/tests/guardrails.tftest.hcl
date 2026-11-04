@@ -163,6 +163,104 @@ run "guardrails_protect_state_bucket_and_ecr_repository" {
   }
 }
 
+run "guardrails_deny_secret_writes_and_baseline_changes" {
+  command = plan
+
+  assert {
+    condition = anytrue([
+      for s in data.aws_iam_policy_document.guardrails.statement : (
+        s.sid == "G1DenySecretValues"
+        && contains(s.actions, "secretsmanager:UpdateSecret")
+        && contains(s.actions, "secretsmanager:PutResourcePolicy")
+      )
+    ])
+    error_message = "G1 must deny UpdateSecret and PutResourcePolicy"
+  }
+
+  assert {
+    condition = anytrue([
+      for s in data.aws_iam_policy_document.guardrails.statement : (
+        s.sid == "G6DenyDetectiveBaseline" && s.effect == "Deny"
+        && toset(s.resources) == toset(["*"])
+        && alltrue([
+          for a in [
+            "access-analyzer:Delete*", "access-analyzer:Update*", "guardduty:Delete*", "guardduty:Disable*",
+            "guardduty:Update*", "budgets:Delete*", "budgets:Modify*", "ce:DeleteAnomalyMonitor", "ce:UpdateAnomalySubscription",
+          ] : contains(s.actions, a)
+        ])
+      )
+    ])
+    error_message = "G6 must deny changing or deleting the analyzer, GuardDuty, budgets and anomaly detection"
+  }
+}
+
+run "escalation_guardrail_is_enforced_in_iam" {
+  command = plan
+
+  assert {
+    condition     = toset(keys(aws_iam_role_policy_attachment.guardrails_escalation)) == toset(["apply", "deploy"])
+    error_message = "the escalation denies attach to the apply and deploy roles only"
+  }
+
+  assert {
+    condition     = aws_iam_policy.guardrails_escalation.name == "sis-dev-gha-escalation"
+    error_message = "the escalation policy is named <prefix>-<env>-gha-escalation"
+  }
+
+  assert {
+    condition = alltrue([
+      for s in data.aws_iam_policy_document.guardrails_escalation.statement : s.effect == "Deny"
+    ])
+    error_message = "the escalation policy holds Deny statements only"
+  }
+
+  assert {
+    condition = anytrue([
+      for s in data.aws_iam_policy_document.guardrails_escalation.statement : (
+        s.sid == "G9DenyRoleWritesWithOtherBoundary"
+        && toset(s.actions) == toset(["iam:CreateRole", "iam:PutRolePolicy", "iam:AttachRolePolicy", "iam:PutRolePermissionsBoundary"])
+        && toset(s.resources) == toset(["arn:aws:iam::123456789012:role/*"])
+        && anytrue([
+          for c in s.condition : (
+            c.test == "StringNotEquals" && c.variable == "iam:PermissionsBoundary"
+            && toset(c.values) == toset(["arn:aws:iam::123456789012:policy/sis-dev-workload-boundary"])
+          )
+        ])
+      )
+    ])
+    error_message = "role writes are denied unless the boundary is the workload boundary"
+  }
+
+  assert {
+    condition = anytrue([
+      for s in data.aws_iam_policy_document.guardrails_escalation.statement : (
+        s.sid == "G9DenyRoleWritesWithoutBoundary"
+        && contains(s.actions, "iam:CreateRole")
+        && anytrue([for c in s.condition : c.test == "Null" && c.variable == "iam:PermissionsBoundary" && toset(c.values) == toset(["true"])])
+      )
+    ])
+    error_message = "a missing boundary key is denied explicitly"
+  }
+
+  assert {
+    condition = anytrue([
+      for s in data.aws_iam_policy_document.guardrails_escalation.statement :
+      s.sid == "G9DenyDeleteRoleBoundary" && toset(s.actions) == toset(["iam:DeleteRolePermissionsBoundary"]) && toset(s.resources) == toset(["*"])
+    ])
+    error_message = "removing a role boundary is denied everywhere"
+  }
+
+  assert {
+    condition = anytrue([
+      for s in data.aws_iam_policy_document.guardrails_escalation.statement : (
+        s.sid == "G9DenyPassRoleWithoutService" && toset(s.actions) == toset(["iam:PassRole"])
+        && anytrue([for c in s.condition : c.test == "Null" && c.variable == "iam:PassedToService" && toset(c.values) == toset(["true"])])
+      )
+    ])
+    error_message = "iam:PassRole is denied when iam:PassedToService is absent"
+  }
+}
+
 run "guardrails_protect_audit_resources" {
   command = plan
 

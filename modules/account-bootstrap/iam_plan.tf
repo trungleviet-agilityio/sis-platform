@@ -1,10 +1,12 @@
 # Credit: adapted from ship-it-safely infra/terraform/bootstrap/iam_plan.tf (lab ADR 0002, B16, B17).
-# T4, plan role (WA7): the AWS managed ReadOnlyAccess policy plus explicit denies on secret values, SSM parameter
-# reads, every KMS decrypt and S3 object reads outside the state keys (ReadOnlyAccess allows many Get* actions that
-# expose data). The managed policy grants no write, so the only write the role has is the inline StateLock statement
-# on the env's .tflock key. Accepted (O14): the data-returning reads that remain are readable by a same-repo PR
-# author, and the nonprod plan role can write the lock object (lock interference). Missing reads surface in the A7
-# CloudTrail check.
+# T4, plan role (WA7): the AWS managed ReadOnlyAccess policy plus explicit denies. ReadOnlyAccess is not purely
+# read-only (v191 grants sqs:Receive*, s3express:CreateSession, dynamodb:PartiQLSelect, logs:StartQuery and
+# StartLiveTail, cognito-idp:AdminGet*, codecommit:GitPull, eks:AccessKubernetesApi, config:Deliver* and many
+# data-plane reads), so the denies below close secret values, SSM parameter reads, every KMS decrypt, the data
+# plane actions of the services a project can hold data in, and S3 object reads outside the state keys. The only
+# write the role is given is the inline StateLock statement on the env's .tflock key. Accepted (O14): reads the
+# list does not name stay readable by a same-repo PR author in nonprod, and the nonprod plan role can write the
+# lock object (lock interference). Missing reads surface in the A7 CloudTrail check.
 
 resource "aws_iam_role" "plan" {
   name                 = local.role_names.plan
@@ -51,7 +53,7 @@ data "aws_iam_policy_document" "plan" {
   statement {
     sid           = "DenyS3ReadsOutsideState"
     effect        = "Deny"
-    actions       = ["s3:GetObject", "s3:GetObjectVersion"]
+    actions       = ["s3:GetObject*"]
     not_resources = [local.state_arn, local.lock_arn]
   }
 
@@ -74,6 +76,34 @@ data "aws_iam_policy_document" "plan" {
     sid       = "DenySsmParameterReads"
     effect    = "Deny"
     actions   = ["ssm:GetParameter*"] # Deny only: covers all four read APIs, including SecureString values
+    resources = ["*"]
+  }
+
+  # Data plane reads that ReadOnlyAccess grants. Deny only; wildcards stay in the action name.
+  statement {
+    sid    = "DenyDataPlaneReads"
+    effect = "Deny"
+    actions = [
+      "athena:GetQueryResults*",
+      "codecommit:GitPull",
+      "cognito-idp:AdminGet*",
+      "config:Deliver*",
+      "dynamodb:BatchGetItem",
+      "dynamodb:GetItem",
+      "dynamodb:PartiQLSelect",
+      "dynamodb:Query",
+      "dynamodb:Scan",
+      "eks:AccessKubernetesApi",
+      "kinesis:GetRecords",
+      "kinesis:GetShardIterator",
+      "logs:FilterLogEvents",
+      "logs:GetLogEvents",
+      "logs:GetQueryResults",
+      "logs:StartLiveTail",
+      "logs:StartQuery",
+      "s3express:CreateSession",
+      "sqs:Receive*",
+    ]
     resources = ["*"]
   }
 }
