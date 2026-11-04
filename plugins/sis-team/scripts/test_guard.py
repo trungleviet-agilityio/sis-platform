@@ -202,6 +202,125 @@ class S2Commands(unittest.TestCase):
         self.assertNotIn(FAKE_AWS_KEY, done.stderr)
 
 
+def write(tool: str, path: str, cwd: str, key: str = "file_path") -> subprocess.CompletedProcess[str]:
+    return run({"tool_name": tool, "tool_input": {key: path, "content": "x"}, "cwd": cwd})
+
+
+class PathScope(unittest.TestCase):
+    """ADR 0002 S2: Edit and Write stay in the repo or worktree; rm -r stays under the repo root."""
+
+    root = ""
+    outside = ""
+    _tmp: tempfile.TemporaryDirectory[str]
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls._tmp = tempfile.TemporaryDirectory()
+        base = os.path.realpath(cls._tmp.name)
+        cls.root = os.path.join(base, "repo")
+        cls.outside = os.path.join(base, "other")
+        os.makedirs(os.path.join(cls.root, "sub"))
+        os.makedirs(cls.outside)
+        subprocess.run(["git", "init", "-q", cls.root], check=True)  # noqa: S603,S607
+        os.symlink(cls.outside, os.path.join(cls.root, "link"))
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls._tmp.cleanup()
+
+    def assert_write_blocked(self, tool: str, path: str, cwd: str, key: str = "file_path") -> None:
+        done = write(tool, path, cwd, key)
+        self.assertEqual(done.returncode, 2, path)
+        self.assertIn("sis-team guard blocked this call (write outside the repo", done.stderr)
+
+    def test_write_outside_is_blocked(self) -> None:
+        elsewhere = os.path.join(self.outside, "f.txt")
+        for tool in ("Write", "Edit", "MultiEdit"):
+            with self.subTest(tool=tool):
+                self.assert_write_blocked(tool, elsewhere, self.root)
+        self.assert_write_blocked("NotebookEdit", elsewhere, self.root, "notebook_path")
+        self.assert_write_blocked("Write", os.path.expanduser("~/.zshrc"), self.root)
+
+    def test_write_escaping_the_root_is_blocked(self) -> None:
+        self.assert_write_blocked("Write", "../other/f.txt", self.root)
+        self.assert_write_blocked("Write", "sub/../../other/f.txt", self.root)
+        self.assert_write_blocked("Write", os.path.join(self.root, "link", "f.txt"), self.root)
+        self.assert_write_blocked("Write", os.path.dirname(self.root), self.root)
+
+    def test_write_inside_is_allowed(self) -> None:
+        for path in ("a.txt", "sub/a.txt", os.path.join(self.root, "sub", "deep", "a.txt")):
+            with self.subTest(path=path):
+                done = write("Write", path, self.root)
+                self.assertEqual(done.returncode, 0)
+                self.assertEqual(done.stderr, "")
+        self.assertEqual(write("Edit", "a.txt", os.path.join(self.root, "sub")).returncode, 0)
+        done = write("NotebookEdit", "n.ipynb", self.root, "notebook_path")
+        self.assertEqual(done.returncode, 0)
+
+    def test_worktree_is_its_own_root(self) -> None:
+        wt = os.path.join(os.path.dirname(self.root), "wt")
+        env = {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t",
+               "GIT_COMMITTER_EMAIL": "t@t", "PATH": os.environ["PATH"]}  # fmt: skip
+        git = ["git", "-C", self.root]
+        subprocess.run([*git, "commit", "-q", "--allow-empty", "-m", "x"], check=True, env=env)  # noqa: S603
+        subprocess.run([*git, "worktree", "add", "-q", wt, "-b", "wt-branch"], check=True)  # noqa: S603
+        self.assertEqual(write("Write", "a.txt", wt).returncode, 0)
+        self.assert_write_blocked("Write", os.path.join(self.root, "a.txt"), wt)
+
+    def test_extra_roots_env(self) -> None:
+        event = {"tool_name": "Write", "tool_input": {"file_path": os.path.join(self.outside, "f")},
+                 "cwd": self.root}  # fmt: skip
+        env = {**os.environ, "SIS_GUARD_EXTRA_ROOTS": self.outside}
+        done = subprocess.run(  # noqa: S603
+            [sys.executable, "-I", GUARD], input=json.dumps(event), capture_output=True,
+            text=True, check=False, env=env,
+        )  # fmt: skip
+        self.assertEqual(done.returncode, 0)
+
+    def test_rm_recursive_outside_is_blocked(self) -> None:
+        for command in [
+            f"rm -rf {self.outside}",
+            "rm -rf ../other",
+            "rm -r /tmp/x",
+            "rm -fr ~/projects",
+            "rm -rf $HOME/x",
+            "rm --recursive /var/tmp/x",
+            "rm -R /opt/x",
+            "rm -rf /",
+            "rm -rf .",
+            "rm -rf ..",
+            "rm -rf link/data",
+            "rm -rf sub /etc/x",
+            'rm -rf "$UNSET_VAR/x"',
+            f"cd {self.outside} && rm -rf x",
+            "cd .. && rm -rf other",
+            "sudo rm -rf /usr/local/x",
+            "ls && rm -rf /tmp/*",
+        ]:
+            with self.subTest(command=command):
+                done = bash_run(command, cwd=self.root)
+                self.assertEqual(done.returncode, 2)
+                self.assertIn("sis-team guard blocked this call (rm -r outside the repo", done.stderr)
+
+    def test_rm_inside_or_not_recursive_is_allowed(self) -> None:
+        for command in [
+            "rm -rf build",
+            "rm -rf ./dist/x sub/y",
+            f"rm -r {self.root}/sub/out",
+            "rm -rf *",
+            "rm -f /tmp/x",
+            "rm /tmp/x",
+            "cd sub && rm -rf out",
+            "rm -rf -- sub/out",
+            "echo rm -rf /tmp/x",
+            "git rm -r --cached sub",
+        ]:
+            with self.subTest(command=command):
+                done = bash_run(command, cwd=self.root)
+                self.assertEqual(done.returncode, 0)
+                self.assertEqual(done.stderr, "")
+
+
 class FileTools(unittest.TestCase):
     def test_reads(self) -> None:
         self.assertEqual(read("/repo/app/.env"), 2)

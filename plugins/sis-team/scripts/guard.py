@@ -215,6 +215,90 @@ def secret_path(path: str) -> bool:
     return any(re.search(pat, p) for pat in SECRET_FILE_PATTERNS)
 
 
+WRITE_TOOLS = {"Edit", "Write", "MultiEdit", "NotebookEdit"}
+RM_PREFIXES = {"sudo", "command", "env", "nice", "time"}
+RM_HINT = "Recursive deletes stay under this repo or worktree. Print the command for the user."
+
+
+def repo_root(cwd: str) -> str:
+    """The top level of the repo that holds cwd (the worktree, inside a worktree), else cwd."""
+    base = cwd or os.getcwd()
+    try:
+        out = subprocess.run(  # noqa: S603  # fixed argv, no shell
+            ["git", "-C", base, "rev-parse", "--show-toplevel"],  # noqa: S607
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return os.path.realpath(base)
+    top = out.stdout.strip()
+    return os.path.realpath(top if out.returncode == 0 and top else base)
+
+
+def allowed_roots(cwd: str) -> list[str]:
+    """The repo or worktree, plus directories the user lists in SIS_GUARD_EXTRA_ROOTS."""
+    roots = [repo_root(cwd)]
+    for extra in os.environ.get("SIS_GUARD_EXTRA_ROOTS", "").split(os.pathsep):
+        if extra:
+            roots.append(os.path.realpath(os.path.expanduser(extra)))
+    return roots
+
+
+def resolve(path: str, cwd: str) -> str | None:
+    """Absolute real path, or None when the text holds a variable or substitution we cannot expand."""
+    expanded = os.path.expandvars(os.path.expanduser(path))
+    if "$" in expanded or "`" in expanded:
+        return None
+    return os.path.realpath(os.path.join(cwd or os.getcwd(), expanded))
+
+
+def inside(path: str, roots: list[str]) -> bool:
+    """True when path is strictly below one of the roots (the root itself does not count)."""
+    return any(path.startswith(root + os.sep) for root in roots)
+
+
+def rm_recursive_problem(seg: str, cwd: str, roots: list[str]) -> str | None:
+    """Return the first target of a recursive rm that is not strictly inside an allowed root."""
+    args = words(seg)
+    while args and os.path.basename(args[0]) in RM_PREFIXES:
+        args = args[1:]
+    if not args or os.path.basename(args[0]) != "rm":
+        return None
+    flags: list[str] = []
+    targets: list[str] = []
+    ended = False
+    for a in args[1:]:
+        if not ended and a == "--":
+            ended = True
+        elif not ended and a.startswith("-"):
+            flags.append(a)
+        else:
+            targets.append(a)
+    recursive = any(
+        f == "--recursive" or (not f.startswith("--") and re.search(r"[rR]", f)) for f in flags
+    )
+    if not recursive:
+        return None
+    for t in targets:
+        resolved = resolve(t, cwd)
+        if resolved is None or not inside(resolved, roots):
+            return t
+    return None
+
+
+def cd_target(seg: str, cwd: str) -> str | None:
+    """The directory a plain `cd <dir>` moves to, "" when it cannot be resolved, None if not a cd."""
+    args = words(seg)
+    if not args or args[0] != "cd":
+        return None
+    rest = [a for a in args[1:] if a != "--"]
+    if len(rest) != 1:
+        return ""
+    return resolve(rest[0], cwd) or ""
+
+
 def check_bash(command: str, cwd: str) -> int:
     for pattern, label in BLOCKED:
         if re.search(pattern, command):
@@ -227,7 +311,20 @@ def check_bash(command: str, cwd: str) -> int:
             "inline GitHub token",
             "Never set GH_TOKEN or GITHUB_TOKEN in a command; board.py sets it for its own subprocess.",
         )
+    here = cwd or os.getcwd()
+    roots = allowed_roots(here)
     for seg in segments(command):
+        moved = cd_target(seg, here)
+        if moved is not None:
+            here = moved
+            continue
+        if not here:
+            if re.match(r"\s*(sudo\s+)?rm\b", seg):
+                return block("rm -r outside the repo (unknown directory)", RM_HINT)
+        else:
+            target = rm_recursive_problem(seg, here, roots)
+            if target is not None:
+                return block(f"rm -r outside the repo ({target})", RM_HINT)
         if BOARD_TOKEN_ITEM in seg:
             leader = os.path.basename((words(seg) or [""])[0])
             if leader not in BOARD_TOKEN_SAFE_COMMANDS:
@@ -254,13 +351,24 @@ def check_bash(command: str, cwd: str) -> int:
     return 0
 
 
-def check_file_tool(tool_input: dict[str, object]) -> int:
-    for key in ("file_path", "path", "glob", "pattern"):
+def check_file_tool(tool: str, tool_input: dict[str, object], cwd: str) -> int:
+    for key in ("file_path", "notebook_path", "path", "glob", "pattern"):
         value = tool_input.get(key)
         if isinstance(value, str) and key != "pattern" and secret_path(value):
             return block(
                 f"secret file {value}", "Name the file and ask the user; never read its content."
             )
+    if tool in WRITE_TOOLS:
+        for key in ("file_path", "notebook_path"):
+            value = tool_input.get(key)
+            if not isinstance(value, str):
+                continue
+            resolved = resolve(value, cwd)
+            if resolved is None or not inside(resolved, allowed_roots(cwd)):
+                return block(
+                    f"write outside the repo ({value})",
+                    "Edit and Write stay inside this repo or worktree. Ask the user.",
+                )
     return 0
 
 
@@ -273,7 +381,7 @@ def main() -> int:
     tool_input = event.get("tool_input", {}) or {}
     if tool == "Bash":
         return check_bash(str(tool_input.get("command", "")), str(event.get("cwd", "")))
-    return check_file_tool(tool_input)
+    return check_file_tool(tool, tool_input, str(event.get("cwd", "")))
 
 
 if __name__ == "__main__":
