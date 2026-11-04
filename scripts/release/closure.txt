@@ -3,7 +3,9 @@
 # One git pathspec per line, all `:(glob)`. Lines starting with # are comments.
 #
 # Rules for editing this file (it is itself in the closure, so any edit moves workflow_sha):
-#   - list exact runtime files where a directory also holds tests or fixtures (AA4: scripts/tf);
+#   - list exact runtime files where a directory also holds tests or fixtures (AA4: scripts/tf; check.sh is a
+#     module-dev check that calls tests outside the closure, so workflows run policy.py and
+#     resolved-sources.sh directly);
 #   - a script a reusable workflow runs or sources must be covered (scripts/ci/check_repo.py, H6);
 #   - the README rule table and intake tests stay outside, so they never move trust (L7).
 # Phase 2 adds `:(glob)adapters/**` together with the first adapter (K).
@@ -19,7 +21,6 @@
 :(glob)scripts/aws/**
 :(glob)scripts/lib.sh
 :(glob)scripts/tf/policy.py
-:(glob)scripts/tf/check.sh
 :(glob)scripts/tf/resolved-sources.sh
 
 # Validator runtime: code, schema and the three rule data files (not questions.json, tests or the README)

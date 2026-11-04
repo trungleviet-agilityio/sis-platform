@@ -42,6 +42,11 @@ CLOSURE = """# closure fixture
 PLUGIN = '{"name": "%s", "version": "%s"}\n'
 INIT = '"""pkg."""\n\n__version__ = "%s"\n'
 PLATFORM = "trungleviet-agilityio/sis-platform"
+MARKETPLACE = (
+    '{"name": "sis-platform", "plugins": ['
+    '{"name": "sis-intake", "source": "./intake"}, '
+    '{"name": "sis-team", "source": "./plugins/sis-team"}]}\n'
+)
 
 
 def git(repo: Path, *args: str) -> str:
@@ -82,6 +87,10 @@ class Repo:
     def checkout_new(self, branch: str, start: str = "HEAD") -> None:
         git(self.path, "checkout", "-q", "-b", branch, start)
 
+    def merge(self, branch: str) -> str:
+        git(self.path, "merge", "-q", "--no-ff", "-m", "merge", branch)
+        return git(self.path, "rev-parse", "HEAD")
+
     def checkout(self, branch: str) -> None:
         git(self.path, "checkout", "-q", branch)
 
@@ -102,6 +111,7 @@ class Repo:
         self.write("intake/.claude-plugin/plugin.json", PLUGIN % ("sis-intake", version))
         self.write("plugins/sis-team/.claude-plugin/plugin.json", PLUGIN % ("sis-team", version))
         self.write("intake/sis_intake/__init__.py", INIT % version)
+        self.write(".claude-plugin/marketplace.json", MARKETPLACE)
 
 
 def lock_text(

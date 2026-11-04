@@ -50,12 +50,30 @@ VERSION_RE = re.compile(r"^v\d+\.\d+\.\d+$")
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 COMMENT_RE = re.compile(r"#\s*(\S+)")
 PLATFORM_USES_RE = re.compile(rf"^{re.escape(PLATFORM)}(?:[/@]|$)", re.IGNORECASE)
-MODULE_START_RE = re.compile(r'^\s*module\s+"[^"]+"\s*\{(?P<rest>.*)$')
-SOURCE_RE = re.compile(r'\bsource\s*=\s*"(?P<s>[^"]*)"')
+MODULE_RE = re.compile(r'\bmodule\s+(?:"[^"]*"|[A-Za-z_][\w-]*)\s*\{')
+SOURCE_RE = re.compile(r'(?:^|[\s{,])"?source"?\s*=\s*"(?P<s>[^"]*)"')
+HEREDOC_RE = re.compile(r"<<-?([A-Za-z_]\w*)[ \t]*\n")
+HCL_SUFFIXES = (".tf", ".tofu")
+JSON_SUFFIXES = (".tf.json", ".tofu.json")
+ACTION_NAMES = ("action.yml", "action.yaml")
 PLATFORM_MODULE_RE = re.compile(
     rf"^git::https://github\.com/{re.escape(PLATFORM)}\.git//modules/[a-z0-9-]+\?ref=(?P<ref>.+)$"
 )
 SKIP_DIRS = {".git", ".terraform"}
+
+
+def _unique_keys(pairs: List[Any]) -> Dict[str, Any]:
+    found: Dict[str, Any] = {}
+    for key, value in pairs:
+        if key in found:
+            raise ValueError(f"duplicate key '{key}'")
+        found[key] = value
+    return found
+
+
+def load_json(text: str) -> Any:
+    """json.loads that refuses a repeated key (a parser keeps the last one, another the first)."""
+    return json.loads(text, object_pairs_hook=_unique_keys)
 
 
 def read_text(root: str, rel: str) -> tuple[Optional[str], List[str]]:
@@ -80,7 +98,7 @@ def check_lock_schema(rel: str, doc: Any) -> List[str]:
     if problems:
         return problems
     lock_version = doc["lock_version"]
-    if isinstance(lock_version, bool) or lock_version != 1:
+    if type(lock_version) is not int or lock_version != 1:
         problems.append(f"{rel}: lock_version must be 1")
     if not (isinstance(doc["version"], str) and VERSION_RE.match(doc["version"])):
         problems.append(f"{rel}: version must look like vX.Y.Z")
@@ -117,19 +135,23 @@ def collect_uses(node: Any) -> List[str]:
     return found
 
 
-def yaml_files(root: str, base: str) -> List[str]:
-    found: List[str] = []
-    for dirpath, dirnames, filenames in os.walk(os.path.join(root, base)):
-        dirnames.sort()
+def yaml_files(root: str) -> List[str]:
+    """yml/yaml files under .github/, plus every action.yml/yaml (not under .git or .terraform)."""
+    found: Set[str] = set()
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = sorted(d for d in dirnames if d not in SKIP_DIRS)
+        rel_dir = os.path.relpath(dirpath, root)
+        under_github = rel_dir == ".github" or rel_dir.startswith(".github" + os.sep)
         for name in sorted(filenames):
-            if name.endswith((".yml", ".yaml")):
-                found.append(os.path.relpath(os.path.join(dirpath, name), root))
-    return found
+            lower = name.lower()
+            if (under_github and lower.endswith((".yml", ".yaml"))) or lower in ACTION_NAMES:
+                found.add(os.path.relpath(os.path.join(dirpath, name), root))
+    return sorted(found)
 
 
 def check_uses(root: str, lock: Dict[str, Any]) -> List[str]:
     problems: List[str] = []
-    for rel in yaml_files(root, ".github"):
+    for rel in yaml_files(root):
         text, errs = read_text(root, rel)
         if text is None:
             problems += errs
@@ -168,23 +190,101 @@ def check_uses(root: str, lock: Dict[str, Any]) -> List[str]:
     return problems
 
 
+def strip_comments(text: str) -> str:
+    """Blank out `#`, `//` and `/* */` comments, leaving strings and heredocs whole.
+
+    Comment markers inside a quoted string (the platform URL holds `//modules`) are not comments,
+    and a quote inside a heredoc must not open a string. Newlines are kept.
+    """
+    out: List[str] = []
+    i, n, in_str = 0, len(text), False
+    while i < n:
+        c = text[i]
+        if in_str:
+            out.append(c)
+            if c == "\\" and i + 1 < n:
+                out.append(text[i + 1])
+                i += 2
+                continue
+            in_str = c != '"'
+            i += 1
+            continue
+        heredoc = HEREDOC_RE.match(text, i) if c == "<" else None
+        if heredoc:
+            end = re.search(
+                rf"^[ \t]*{re.escape(heredoc.group(1))}[ \t]*$", text[heredoc.end() :], re.M
+            )
+            stop = n if end is None else heredoc.end() + end.end()
+            out.append(text[i:stop])
+            i = stop
+        elif c == '"':
+            in_str = True
+            out.append(c)
+            i += 1
+        elif text.startswith("/*", i):
+            close = text.find("*/", i + 2)
+            stop = n if close < 0 else close + 2
+            out.append("".join(ch if ch == "\n" else " " for ch in text[i:stop]))
+            i = stop
+        elif c == "#" or text.startswith("//", i):
+            newline = text.find("\n", i)
+            stop = n if newline < 0 else newline
+            out.append(" " * (stop - i))
+            i = stop
+        else:
+            out.append(c)
+            i += 1
+    return "".join(out)
+
+
+def block_end(text: str, start: int) -> int:
+    """Index just past the `}` that closes the block whose `{` ended just before `start`."""
+    depth, i, n, in_str = 1, start, len(text), False
+    while i < n:
+        c = text[i]
+        if in_str:
+            if c == "\\":
+                i += 1
+            elif c == '"':
+                in_str = False
+        elif c == '"':
+            in_str = True
+        elif c == "{":
+            depth += 1
+        elif c == "}":
+            depth -= 1
+            if depth == 0:
+                return i + 1
+        i += 1
+    return n
+
+
 def module_sources(text: str) -> List[str]:
-    """Every `source = "..."` inside a `module "x" { }` block (blocks end at a `}` in column 0)."""
+    """Every `source = "..."` in a `module <label> { }` block, wherever the block starts."""
+    clean = strip_comments(text)
     sources: List[str] = []
-    in_module = False
-    for line in text.splitlines():
-        if line.lstrip().startswith(("#", "//")):
+    for start in MODULE_RE.finditer(clean):
+        body = clean[start.end() : block_end(clean, start.end())]
+        sources += [m.group("s") for m in SOURCE_RE.finditer(body)]
+    return sources
+
+
+def json_module_sources(doc: Any) -> List[str]:
+    """`module.<name>.source` of a *.tf.json document (each level may be an object or a list)."""
+
+    def as_list(value: Any) -> List[Any]:
+        return value if isinstance(value, list) else [value]
+
+    sources: List[str] = []
+    if not isinstance(doc, dict):
+        return sources
+    for group in as_list(doc.get("module")):
+        if not isinstance(group, dict):
             continue
-        start = MODULE_START_RE.match(line)
-        if start:
-            rest = start.group("rest")
-            sources += [m.group("s") for m in SOURCE_RE.finditer(rest)]
-            in_module = not rest.rstrip().endswith("}")
-            continue
-        if in_module:
-            sources += [m.group("s") for m in SOURCE_RE.finditer(line)]
-            if line.startswith("}"):
-                in_module = False
+        for body in group.values():
+            for item in as_list(body):
+                if isinstance(item, dict) and isinstance(item.get("source"), str):
+                    sources.append(item["source"])
     return sources
 
 
@@ -193,14 +293,24 @@ def check_modules(root: str, lock: Dict[str, Any]) -> List[str]:
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames[:] = sorted(d for d in dirnames if d not in SKIP_DIRS)
         for name in sorted(filenames):
-            if not name.endswith(".tf"):
+            lower = name.lower()
+            is_json = lower.endswith(JSON_SUFFIXES)
+            if not (is_json or lower.endswith(HCL_SUFFIXES)):
                 continue
             rel = os.path.relpath(os.path.join(dirpath, name), root)
             text, errs = read_text(root, rel)
             if text is None:
                 problems += errs
                 continue
-            for source in module_sources(text):
+            if is_json:
+                try:
+                    sources = json_module_sources(load_json(text))
+                except ValueError as exc:
+                    problems.append(f"{rel}: not valid JSON ({exc})")
+                    continue
+            else:
+                sources = module_sources(text)
+            for source in sources:
                 if source.startswith(("./", "../")):
                     continue
                 match = PLATFORM_MODULE_RE.match(source)
@@ -223,7 +333,7 @@ def check_settings(root: str, lock: Dict[str, Any]) -> List[str]:
     if text is None:
         return errs
     try:
-        doc = json.loads(text)
+        doc = load_json(text)
     except ValueError as exc:
         return [f"{rel}: not valid JSON ({exc})"]
     market = None
@@ -243,6 +353,20 @@ def check_settings(root: str, lock: Dict[str, Any]) -> List[str]:
             f"{head}.source.ref is '{source.get('ref')}', expected the lock version "
             f"'{lock['version']}' (L4)"
         )
+    markets = doc["extraKnownMarketplaces"]
+    for name, entry in markets.items():
+        if name == "sis-platform" or not isinstance(entry, dict):
+            continue
+        other = entry.get("source")
+        if not isinstance(other, dict) or not any(
+            isinstance(v, str) and "sis-platform" in v.lower() for v in other.values()
+        ):
+            continue
+        if other.get("ref") != lock["version"]:
+            problems.append(
+                f"{rel}: extraKnownMarketplaces.{name} points at sis-platform with ref "
+                f"'{other.get('ref')}', expected the lock version '{lock['version']}' (L4)"
+            )
     return problems
 
 
@@ -252,7 +376,7 @@ def check_offline(root: str) -> tuple[List[str], Optional[Dict[str, Any]]]:
     if text is None:
         return problems, None
     try:
-        doc = json.loads(text)
+        doc = load_json(text)
     except ValueError as exc:
         return [f"platform.lock: not valid JSON ({exc})"], None
     schema_problems = check_lock_schema("platform.lock", doc)
@@ -304,14 +428,19 @@ class Platform:
     def has_file(self, sha: str, rel: str) -> bool:
         return self.run("cat-file", "-e", f"{sha}:{rel}").returncode == 0
 
-    def released_workflow_shas(self) -> Set[str]:
+    def released_workflow_shas(self, tip: str) -> Set[str]:
+        """workflow_sha of every vX.Y.Z tag whose commit is on main (other tags release nothing).
+
+        Annotated tags are the preferred form for releases; a lightweight tag counts the same
+        here, and the immutable-tag ruleset (L4) is what protects either kind.
+        """
         found: Set[str] = set()
         for tag in (self.out("tag", "--list", "v*") or "").splitlines():
             if not VERSION_RE.match(tag):
                 continue
             commit = self.out("rev-parse", f"refs/tags/{tag}^{{commit}}")
             specs = closure.specs_at(self.path, tag)
-            if commit is None or specs is None:
+            if commit is None or specs is None or not self.is_ancestor(commit, tip):
                 continue  # a tag from before the closure existed cannot be a released workflow_sha
             try:
                 found.add(closure.workflow_sha(self.path, commit, specs))
@@ -378,7 +507,7 @@ def check_remote(lock: Dict[str, Any], source: str) -> List[str]:
             if not platform.is_ancestor(sha, tip):
                 problems.append(f"{head} not an ancestor of the sis-platform main tip (L3 a)")
             if released is None:
-                released = platform.released_workflow_shas()
+                released = platform.released_workflow_shas(tip)
             if sha not in released:
                 problems.append(f"{head} not the workflow_sha of any released v* tag (L3 b)")
             if not DEPLOY_TRUST_ALLOWED and platform.has_file(sha, DEPLOY_WORKFLOW):

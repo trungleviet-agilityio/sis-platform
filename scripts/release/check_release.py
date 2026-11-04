@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import os
+import posixpath
 import re
 import sys
 from typing import List, Optional, Tuple
@@ -29,7 +30,7 @@ import closure  # noqa: E402  (scripts/platform/closure.py)
 
 TAG_RE = re.compile(r"^v(\d+)\.(\d+)\.(\d+)$")
 INIT_PATH = "intake/sis_intake/__init__.py"
-VERSION_LINE_RE = re.compile(r'^__version__\s*=\s*"([^"]+)"', re.MULTILINE)
+VERSION_LINE_RE = re.compile(r'^__version__\s*=\s*(["\'])(.+?)\1', re.MULTILINE)
 
 
 def parse_tag(tag: str) -> Optional[Tuple[int, int, int]]:
@@ -52,13 +53,33 @@ def previous_tag(repo: str, want: Tuple[int, int, int], sha: str) -> Optional[st
     return best[1] if best else None
 
 
+def plugin_files(repo: str, sha: str) -> tuple[List[str], List[str]]:
+    """plugin.json paths named by marketplace.json `plugins[].source`, and the problems found."""
+    market = ".claude-plugin/marketplace.json"
+    try:
+        doc = json.loads(closure.git(repo, "show", f"{sha}:{market}"))
+    except (closure.ClosureError, ValueError):
+        return [], [f"{market}: cannot read in the release commit (L4)"]
+    plugins = doc.get("plugins") if isinstance(doc, dict) else None
+    if not isinstance(plugins, list) or not plugins:
+        return [], [f"{market}: lists no plugins (L4)"]
+    paths: List[str] = []
+    problems: List[str] = []
+    for plugin in plugins:
+        name = plugin.get("name") if isinstance(plugin, dict) else None
+        source = plugin.get("source") if isinstance(plugin, dict) else None
+        if not isinstance(source, str) or not source.startswith("./"):
+            problems.append(
+                f"{market}: plugin '{name}' has a source that is not a ./relative path (L4)"
+            )
+            continue
+        paths.append(posixpath.normpath(posixpath.join(source, ".claude-plugin/plugin.json")))
+    return paths, problems
+
+
 def version_problems(repo: str, tag: str, sha: str) -> List[str]:
     want = tag[1:]
-    problems: List[str] = []
-    listing = closure.git(repo, "ls-tree", "-r", "--name-only", "-z", sha)
-    plugins = sorted(p for p in listing.split("\0") if p.endswith(".claude-plugin/plugin.json"))
-    if not plugins:
-        problems.append("no .claude-plugin/plugin.json found in the release commit (L4)")
+    plugins, problems = plugin_files(repo, sha)
     for path in plugins:
         try:
             doc = json.loads(closure.git(repo, "show", f"{sha}:{path}"))
@@ -77,8 +98,8 @@ def version_problems(repo: str, tag: str, sha: str) -> List[str]:
     found = VERSION_LINE_RE.search(init)
     if not found:
         problems.append(f"{INIT_PATH}: no __version__ found (L4)")
-    elif found.group(1) != want:
-        problems.append(f"{INIT_PATH}: __version__ {found.group(1)} does not match tag {tag} (L4)")
+    elif found.group(2) != want:
+        problems.append(f"{INIT_PATH}: __version__ {found.group(2)} does not match tag {tag} (L4)")
     return problems
 
 
@@ -127,6 +148,8 @@ def main(argv: List[str]) -> int:
         paths: List[str] = []
         if prev_ref is None:
             print("previous tag: none (first release)")
+            if version[2] > 0:
+                problems.append(f"patch release {tag} has no previous release tag to compare (L7)")
         else:
             try:
                 prev_sha = closure.git(
@@ -136,6 +159,14 @@ def main(argv: List[str]) -> int:
                 print(f"cannot resolve previous ref {prev_ref}", file=sys.stderr)
                 return 2
             print(f"previous tag: {prev_ref}")
+            if prev:
+                print(f"previous ref overridden by --prev {prev}")
+            if version[2] > 0 and not closure.git_ok(
+                repo, "merge-base", "--is-ancestor", prev_sha, sha
+            ):
+                problems.append(
+                    f"patch release {tag}: previous ref {prev_ref} is not an ancestor of {sha} (L7)"
+                )
             prev_specs = closure.specs_at(repo, prev_sha)
             if prev_specs is None:
                 moved = True

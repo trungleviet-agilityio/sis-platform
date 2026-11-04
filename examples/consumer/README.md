@@ -25,4 +25,8 @@ python3 scripts/platform/check_lock.py examples/consumer
 python3 scripts/platform/check_lock.py examples/consumer --remote
 ```
 
+The module-source rule is a text and JSON scan of `*.tf`, `*.tf.json`, `*.tofu` and `*.tofu.json`. It is not the
+last line of defense: the reusable workflows (sub-PR 1f-2) also run `scripts/tf/resolved-sources.sh` over
+`.terraform/modules/modules.json` after `terraform init`, which fails closed on what Terraform actually resolved.
+
 `--remote` fails on this example by design: its SHAs are placeholders, not a real release.

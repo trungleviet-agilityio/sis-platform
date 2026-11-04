@@ -33,8 +33,18 @@ def git(repo: str, *args: str) -> str:
     return done.stdout.decode(errors="replace")
 
 
+def git_ok(repo: str, *args: str) -> bool:
+    """True when `git <args>` exits 0 (for yes/no questions such as merge-base --is-ancestor)."""
+    cmd = ["git", "-C", repo, *args]
+    return subprocess.run(cmd, capture_output=True, check=False).returncode == 0  # noqa: S603
+
+
 def parse_specs(text: str) -> List[str]:
-    return [line.strip() for line in text.splitlines() if line.strip() and not line.startswith("#")]
+    return [
+        line.strip()
+        for line in text.splitlines()
+        if line.strip() and not line.strip().startswith("#")
+    ]
 
 
 def specs_at(repo: str, ref: str) -> Optional[List[str]]:
@@ -49,6 +59,14 @@ def specs_at(repo: str, ref: str) -> Optional[List[str]]:
 def workflow_sha(repo: str, ref: str, specs: List[str]) -> str:
     if not specs:
         raise ClosureError("the closure has no pathspecs")
+    try:
+        merges = git(repo, "rev-list", "--merges", "--max-count=1", ref).strip()
+    except ClosureError as exc:
+        raise ClosureError(f"git rev-list failed for {ref}: {exc}") from exc
+    if merges:
+        # `git log -1 -- paths` simplifies history across merges and may pick either side. main is
+        # linear (squash merges only, L2), so a merge here means the wrong ref was given.
+        raise ClosureError(f"{ref} has merge commits; workflow_sha needs linear history")
     try:
         out = git(repo, "log", "-1", "--format=%H", ref, "--", *specs).strip()
     except ClosureError as exc:

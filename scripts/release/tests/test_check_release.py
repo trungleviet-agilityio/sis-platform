@@ -189,14 +189,72 @@ class VersionAgreement(ReleaseCase):
         rc, _out, err = self.release("v0.1.1")
         self.assertEqual((rc, err), (0, ""))
 
-    def test_no_plugin_json_at_all_is_an_error(self) -> None:
+    def test_no_marketplace_at_all_is_an_error(self) -> None:
         bare = Repo(self.tmp / "bare")
         bare.write("scripts/release/closure.txt", helpers.CLOSURE)
         bare.commit("x")
         self.repo = bare
         rc, _out, err = self.release("v0.1.0")
         self.assertEqual(rc, 1)
-        self.assertIn("no .claude-plugin/plugin.json found", err)
+        self.assertIn(".claude-plugin/marketplace.json: cannot read", err)
+
+    def test_plugin_roots_come_from_the_marketplace(self) -> None:
+        self.ship("0.1.1", "docs/a.md")
+        # A stale plugin.json that the marketplace does not list is not a release artifact.
+        self.repo.write("old/.claude-plugin/plugin.json", helpers.PLUGIN % ("old", "0.0.1"))
+        self.repo.commit("stale")
+        rc, _out, err = self.release("v0.1.1")
+        self.assertEqual((rc, err), (0, ""))
+
+    def test_a_new_marketplace_plugin_is_checked(self) -> None:
+        self.ship("0.1.1", "docs/a.md")
+        market = helpers.MARKETPLACE.replace("]}", ', {"name": "n", "source": "./newp"}]}')
+        self.repo.write(".claude-plugin/marketplace.json", market)
+        self.repo.write("newp/.claude-plugin/plugin.json", helpers.PLUGIN % ("n", "0.0.1"))
+        self.repo.commit("new plugin")
+        rc, _out, err = self.release("v0.1.1")
+        self.assertEqual(rc, 1)
+        self.assertIn(
+            "newp/.claude-plugin/plugin.json: version 0.0.1 does not match tag v0.1.1", err
+        )
+
+    def test_a_listed_plugin_without_a_plugin_json(self) -> None:
+        self.ship("0.1.1", "docs/a.md")
+        market = helpers.MARKETPLACE.replace("]}", ', {"name": "n", "source": "./gone"}]}')
+        self.repo.write(".claude-plugin/marketplace.json", market)
+        self.repo.commit("missing plugin")
+        rc, _out, err = self.release("v0.1.1")
+        self.assertEqual(rc, 1)
+        self.assertIn("gone/.claude-plugin/plugin.json: cannot read", err)
+
+    def test_a_marketplace_source_that_is_not_a_relative_path(self) -> None:
+        self.ship("0.1.1", "docs/a.md")
+        market = '{"plugins": [{"name": "n", "source": {"source": "github", "repo": "o/r"}}]}'
+        self.repo.write(".claude-plugin/marketplace.json", market)
+        self.repo.commit("remote plugin")
+        rc, _out, err = self.release("v0.1.1")
+        self.assertEqual(rc, 1)
+        self.assertIn("plugin 'n' has a source that is not a ./relative path (L4)", err)
+
+    def test_single_quoted_version_constant(self) -> None:
+        self.ship("0.1.1", "docs/a.md")
+        self.repo.write("intake/sis_intake/__init__.py", "__version__ = '0.1.1'\n")
+        self.repo.commit("single quotes")
+        rc, _out, err = self.release("v0.1.1")
+        self.assertEqual((rc, err), (0, ""))
+
+    def test_patch_without_a_previous_release_tag_fails(self) -> None:
+        helpers.git(self.repo.path, "tag", "-d", "v0.1.0")
+        self.ship("0.1.1", "docs/a.md")
+        rc, _out, err = self.release("v0.1.1")
+        self.assertEqual(rc, 1)
+        self.assertIn("patch release v0.1.1 has no previous release tag to compare (L7)", err)
+
+    def test_prev_override_is_logged(self) -> None:
+        self.ship("0.1.1", "docs/a.md")
+        rc, out, _err = self.release("v0.1.1", "--prev", "v0.1.0")
+        self.assertEqual(rc, 0)
+        self.assertIn("previous ref overridden by --prev v0.1.0", out)
 
 
 class Usage(ReleaseCase):

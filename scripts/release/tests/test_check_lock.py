@@ -238,6 +238,177 @@ class ManifestAndPins(OfflineCase):
         self.expect_ok()
 
 
+class ModuleBypasses(OfflineCase):
+    """Spellings that `terraform init` accepts and a line scan would miss."""
+
+    REG = "terraform-aws-modules/vpc/aws"
+
+    def add(self, name: str, text: str) -> None:
+        (self.root / "infra" / "bootstrap" / name).write_text(text, encoding="utf-8")
+
+    def expect_remote(self, source: str = REG) -> None:
+        self.expect_fail(f"remote module source '{source}' is not sis-platform at release_sha (L3)")
+
+    def test_unquoted_label(self) -> None:
+        self.add("evil.tf", f'module evil {{\n  source = "{self.REG}"\n}}\n')
+        self.expect_remote()
+
+    def test_block_comment_before_module_on_the_line(self) -> None:
+        self.add("evil.tf", f'/* x */ module "e" {{\n  source = "{self.REG}"\n}}\n')
+        self.expect_remote()
+
+    def test_module_after_a_closing_brace_on_the_same_line(self) -> None:
+        self.add("evil.tf", f'locals {{}} module "e" {{\n  source = "{self.REG}"\n}}\n')
+        self.expect_remote()
+
+    def test_a_lone_quote_in_a_heredoc_does_not_hide_a_later_module(self) -> None:
+        self.add(
+            "evil.tf",
+            'locals {\n  note = <<-EOT\n    say "hi\n  EOT\n}\n\n'
+            f'module "e" {{\n  source = "{self.REG}"\n}}\n',
+        )
+        self.expect_remote()
+
+    def test_single_line_module(self) -> None:
+        self.add("evil.tf", f'module "e" {{ source = "{self.REG}" }}\n')
+        self.expect_remote()
+
+    def test_quoted_source_key(self) -> None:
+        self.add("evil.tf", f'module "e" {{\n  "source" = "{self.REG}"\n}}\n')
+        self.expect_remote()
+
+    def test_source_after_other_arguments_and_comments(self) -> None:
+        self.add(
+            "evil.tf",
+            f'module "e" {{\n  # source = "../ok"\n  x = 1\n  source = "{self.REG}"\n}}\n',
+        )
+        self.expect_remote()
+
+    def test_commented_out_modules_are_ignored(self) -> None:
+        self.add(
+            "ok.tf",
+            f'/* module "a" {{\n  source = "{self.REG}"\n}} */\n'
+            f'# module "b" {{ source = "{self.REG}" }}\n'
+            f'// module "c" {{ source = "{self.REG}" }}\n',
+        )
+        self.expect_ok()
+
+    def test_slashes_inside_a_string_are_not_a_comment(self) -> None:
+        # The platform URL holds `//modules`; stripping `//` comments must not cut it.
+        self.expect_ok()
+        self.edit("infra/bootstrap/main.tf", f"ref={A}", f"ref={B}")
+        self.expect_fail("is pinned to ref")
+
+    def tf_json(self, name: str, doc: object) -> None:
+        self.add(name, json.dumps(doc))
+
+    def test_tf_json_module(self) -> None:
+        self.tf_json("evil.tf.json", {"module": {"e": {"source": self.REG}}})
+        self.expect_remote()
+
+    def test_tf_json_module_list_form(self) -> None:
+        self.tf_json("evil.tf.json", {"module": [{"e": {"source": self.REG}}]})
+        self.expect_remote()
+
+    def test_tf_json_local_and_pinned_pass(self) -> None:
+        url = f"git::https://github.com/{PLATFORM}.git//modules/x?ref={A}"
+        self.tf_json("ok.tf.json", {"module": {"a": {"source": "./x"}, "b": {"source": url}}})
+        self.expect_ok()
+
+    def test_tf_json_with_a_wrong_ref(self) -> None:
+        url = f"git::https://github.com/{PLATFORM}.git//modules/x?ref={B}"
+        self.tf_json("bad.tf.json", {"module": {"b": {"source": url}}})
+        self.expect_fail(f"is pinned to ref {B}, not release_sha {A} (L3)")
+
+    def test_tf_json_that_is_not_json(self) -> None:
+        self.add("bad.tf.json", "{")
+        self.expect_fail("bad.tf.json: not valid JSON")
+
+    def test_tofu_files(self) -> None:
+        self.add("evil.tofu", f'module "e" {{\n  source = "{self.REG}"\n}}\n')
+        self.expect_remote()
+
+    def test_tofu_json_files(self) -> None:
+        self.tf_json("evil.tofu.json", {"module": {"e": {"source": self.REG}}})
+        self.expect_remote()
+
+    def test_uppercase_extension(self) -> None:
+        self.add("EVIL.TF", f'module "e" {{\n  source = "{self.REG}"\n}}\n')
+        self.expect_remote()
+
+
+class LowFindings(OfflineCase):
+    def test_lock_version_float_is_not_one(self) -> None:
+        (self.root / "platform.lock").write_text(
+            (self.root / "platform.lock")
+            .read_text()
+            .replace('"lock_version": 1', '"lock_version": 1.0'),
+            encoding="utf-8",
+        )
+        self.expect_fail("platform.lock: lock_version must be 1")
+
+    def test_duplicate_keys_in_the_lock(self) -> None:
+        path = self.root / "platform.lock"
+        path.write_text(
+            path.read_text().replace('"version"', '"version": "v9.9.9", "version"', 1),
+            encoding="utf-8",
+        )
+        self.expect_fail("platform.lock: not valid JSON (duplicate key 'version')")
+
+    def test_duplicate_keys_in_settings(self) -> None:
+        path = self.root / ".claude" / "settings.json"
+        path.write_text(
+            path.read_text().replace('"ref"', '"ref": "main", "ref"', 1), encoding="utf-8"
+        )
+        self.expect_fail(".claude/settings.json: not valid JSON (duplicate key 'ref')")
+
+    def test_uppercase_yaml_extension_is_scanned(self) -> None:
+        wf = self.root / ".github" / "workflows" / "X.YML"
+        uses = f"{PLATFORM}/.github/workflows/reusable-x.yml@{A}"
+        wf.write_text("jobs:\n  j:\n    uses: " + uses + " # v0.2.0\n", encoding="utf-8")
+        self.expect_fail("X.YML:3: uses")
+
+    def test_action_yml_outside_github_is_scanned(self) -> None:
+        action = self.root / "tools" / "x" / "action.yaml"
+        action.parent.mkdir(parents=True)
+        uses = f"{PLATFORM}/.github/actions/y@{A}"
+        action.write_text("runs:\n  steps:\n    - uses: " + uses + " # v0.2.0\n", encoding="utf-8")
+        self.expect_fail("tools/x/action.yaml:3: uses")
+
+    def test_action_yml_in_terraform_cache_is_skipped(self) -> None:
+        action = self.root / ".terraform" / "x" / "action.yml"
+        action.parent.mkdir(parents=True)
+        uses = f"{PLATFORM}/.github/actions/y@{A}"
+        action.write_text("runs:\n  steps:\n    - uses: " + uses + " # v0.2.0\n", encoding="utf-8")
+        self.expect_ok()
+
+    def test_second_marketplace_for_the_platform_with_another_ref(self) -> None:
+        path = self.root / ".claude" / "settings.json"
+        doc = json.loads(path.read_text())
+        alias = {"source": {"source": "github", "repo": PLATFORM.upper(), "ref": "main"}}
+        doc["extraKnownMarketplaces"]["alias"] = alias
+        path.write_text(json.dumps(doc), encoding="utf-8")
+        self.expect_fail(
+            "extraKnownMarketplaces.alias points at sis-platform with ref 'main', "
+            "expected the lock version 'v0.2.0' (L4)"
+        )
+
+    def test_second_marketplace_for_the_platform_with_the_lock_version_passes(self) -> None:
+        path = self.root / ".claude" / "settings.json"
+        doc = json.loads(path.read_text())
+        alias = {"source": {"source": "github", "repo": PLATFORM, "ref": "v0.2.0"}}
+        doc["extraKnownMarketplaces"]["alias"] = alias
+        path.write_text(json.dumps(doc), encoding="utf-8")
+        self.expect_ok()
+
+    def test_unrelated_marketplace_is_left_alone(self) -> None:
+        path = self.root / ".claude" / "settings.json"
+        doc = json.loads(path.read_text())
+        doc["extraKnownMarketplaces"]["other"] = {"source": {"source": "github", "repo": "o/r"}}
+        path.write_text(json.dumps(doc), encoding="utf-8")
+        self.expect_ok()
+
+
 class Settings(OfflineCase):
     def test_settings_missing(self) -> None:
         (self.root / ".claude" / "settings.json").unlink()
@@ -387,6 +558,17 @@ class RemoteChecks(RemoteCase):
         self.relock(self.c4, self.c3, [self.c3, self.c4])
         self.expect_remote_fail(
             f"trusted_workflow_shas {self.c4}: not the workflow_sha of any released v* tag (L3 b)"
+        )
+
+    def test_a_tag_on_a_side_branch_does_not_make_a_workflow_sha_released(self) -> None:
+        self.plat.checkout_new("side", self.c4)
+        self.plat.write("scripts/platform/tool.py", "print('side')\n")
+        side = self.plat.commit("side")
+        self.plat.tag("v0.9.0", side)
+        self.plat.checkout("main")
+        self.relock(self.c4, self.c3, [self.c3, side])
+        self.expect_remote_fail(
+            f"trusted_workflow_shas {side}: not the workflow_sha of any released v* tag (L3 b)"
         )
 
     def test_previous_released_workflow_sha_is_trusted(self) -> None:

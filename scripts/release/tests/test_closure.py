@@ -36,6 +36,21 @@ class ClosureComputation(unittest.TestCase):
     def test_comments_and_blank_lines_are_not_pathspecs(self) -> None:
         self.assertEqual(closure.parse_specs("# c\n\n  :(glob)a/**  \n"), [":(glob)a/**"])
 
+    def test_indented_comment_lines_are_comments(self) -> None:
+        self.assertEqual(closure.parse_specs("  # c\n\t# d\n:(glob)a\n"), [":(glob)a"])
+
+    def test_history_with_a_merge_commit_is_refused(self) -> None:
+        self.repo.checkout_new("side")
+        self.repo.write("docs/side.md", "side\n")
+        self.repo.commit("side")
+        self.repo.checkout("main")
+        self.repo.write("docs/main.md", "main\n")
+        self.repo.commit("main")
+        self.repo.merge("side")
+        with self.assertRaises(closure.ClosureError) as ctx:
+            self.sha()
+        self.assertIn("has merge commits; workflow_sha needs linear history", str(ctx.exception))
+
     def test_workflow_sha_is_the_last_commit_that_touched_the_closure(self) -> None:
         self.assertEqual(self.sha(), self.first)
 
@@ -87,7 +102,7 @@ class ClosureComputation(unittest.TestCase):
     def test_unknown_ref_is_an_error(self) -> None:
         with self.assertRaises(closure.ClosureError) as ctx:
             closure.workflow_sha(str(self.repo.path), "v9.9.9", self.specs)
-        self.assertIn("git log failed", str(ctx.exception))
+        self.assertIn("rev-list failed", str(ctx.exception))
 
 
 class RealClosureFile(unittest.TestCase):
@@ -109,8 +124,10 @@ class RealClosureFile(unittest.TestCase):
 
     def test_aa4_exact_tf_runtime_files_only(self) -> None:
         covered = self.covered()
-        for runtime in ("policy.py", "check.sh", "resolved-sources.sh"):
+        for runtime in ("policy.py", "resolved-sources.sh"):
             self.assertIn(f"scripts/tf/{runtime}", covered)
+        # check.sh is a module-dev check that calls tests outside the closure; workflows skip it.
+        self.assertNotIn("scripts/tf/check.sh", covered)
         self.assertNotIn("scripts/tf/test_policy.py", covered)
         self.assertNotIn("scripts/tf/resolved-sources-selftest.sh", covered)
         self.assertFalse([p for p in self.specs if p.endswith("scripts/tf/**")])
@@ -170,6 +187,33 @@ class RealClosureFile(unittest.TestCase):
         done = subprocess.run(emit, capture_output=True, check=False)  # noqa: S603
         self.assertEqual(done.returncode, 0, done.stderr.decode())
         self.assertIn("platform", json.loads(done.stdout.decode()))
+
+    def closure_guard(self, *runs: str) -> tuple[int, str]:
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, tmp, True)
+        wf = tmp / "reusable-x.yml"
+        body = "".join(f"      - run: .platform/{r}\n" for r in runs)
+        wf.write_text(f"on: workflow_call\njobs:\n  a:\n    steps:\n{body}", encoding="utf-8")
+        guard = REPO_ROOT / "scripts" / "ci" / "check_repo.py"
+        closure_file = REPO_ROOT / "scripts" / "release" / "closure.txt"
+        cmd = [sys.executable, str(guard), "closure", "--repo", str(REPO_ROOT)]
+        cmd += ["--closure", str(closure_file), str(wf)]
+        done = subprocess.run(cmd, capture_output=True, check=False)  # noqa: S603
+        return done.returncode, done.stderr.decode()
+
+    def test_workflows_may_run_policy_and_resolved_sources_directly(self) -> None:
+        rc, err = self.closure_guard(
+            "scripts/tf/policy.py plan.json",
+            "scripts/tf/resolved-sources.sh infra .tfdata",
+            "scripts/platform/check_lock.py .",
+            "intake/sis_intake/validate.py platform.yaml",
+        )
+        self.assertEqual((rc, err), (0, ""))
+
+    def test_a_workflow_running_check_sh_is_not_covered(self) -> None:
+        rc, err = self.closure_guard("scripts/tf/check.sh")
+        self.assertEqual(rc, 1)
+        self.assertIn(".platform/scripts/tf/check.sh is not covered by", err)
 
     def test_guard_accepts_the_repository(self) -> None:
         guard = REPO_ROOT / "scripts" / "ci" / "check_repo.py"
