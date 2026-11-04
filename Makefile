@@ -32,6 +32,7 @@ lint: .venv-ci/.installed ## pre-commit hooks on all files, shellcheck, actionli
 
 test: require-intake ## Intake unit tests (stdlib unittest)
 	$(PYTHON) -m unittest discover -s intake/tests -t intake
+	$(PYTHON) -m unittest discover -s adapters/tests
 
 validate-examples: require-intake ## Every valid example exits 0, every invalid one exits non-zero
 	@scripts/ci/validate-examples.sh
