@@ -3,11 +3,9 @@
 Run: python3 -m unittest discover -s adapters/tests   (from the repo root)
 
 The schemas must stay inside the keyword subset that intake/sis_intake/schema.py interprets (Z4),
-so one
-interpreter validates the manifest, the adapter declaration and every result line. No adapter
-exists in
-Phase 1; these tests pin the contract that Phase 2 adapters and the conformance suite (K7) are
-built against.
+so one interpreter validates the manifest, the adapter declaration and every result line. No
+adapter exists in Phase 1; these tests pin the contract that Phase 2 adapters and the conformance
+suite (K7) are built against.
 """
 
 import copy

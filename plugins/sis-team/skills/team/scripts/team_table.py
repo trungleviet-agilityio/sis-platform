@@ -2,8 +2,7 @@
 """Print the sis-team agent roster as a Markdown table, read from the plugin files.
 
 Phase comes from the "<Phase>-phase" prefix of each agent's description; "Spawned by" lists the
-skills
-whose SKILL.md names `sis-team:<agent>`. Stdlib only, so it runs with any python3.
+skills whose SKILL.md names `sis-team:<agent>`. Stdlib only, so it runs with any python3.
 Usage: team_table.py [plugin_dir]   (default: the plugin this script lives in)
 """
 
@@ -55,8 +54,8 @@ def main() -> int:
         phase_match = re.match(r"(\w+)-phase", description)
         phase = phase_match.group(1).capitalize() if phase_match else "?"
         # Keep the sentences that say what the agent does: drop the first "<Phase>-phase ..."
-        # sentence, the
-        # "Read-only" note (the Access column shows it) and "Use from/as ..." routing hints.
+        # sentence, the "Read-only" note (the Access column shows it) and "Use from/as ..."
+        # routing hints.
         sentences = re.split(r"(?<=\.)\s+(?=[A-Z])", description)[1:]
         kept = [s for s in sentences if not s.startswith(("Read-only", "Use from", "Use as"))]
         does = " ".join(kept).rstrip(".")

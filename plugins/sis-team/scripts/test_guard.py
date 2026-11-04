@@ -678,10 +678,8 @@ class ScratchAndRoots(unittest.TestCase):
     def test_extra_roots_refuse_broad_directories(self) -> None:
         home = os.path.realpath(os.path.expanduser("~"))
         for value in ("/", home, "/tmp", "/private/tmp", "~"):  # noqa: S108
-            with (
-                self.subTest(value=value),
-                mock.patch.dict(os.environ, {"SIS_GUARD_EXTRA_ROOTS": value}),
-            ):
+            patched = mock.patch.dict(os.environ, {"SIS_GUARD_EXTRA_ROOTS": value})
+            with self.subTest(value=value), patched:
                 self.assertEqual(guard.extra_roots(), [])
         with tempfile.TemporaryDirectory() as base:
             env = mock.patch.dict(os.environ, {"SIS_GUARD_EXTRA_ROOTS": base})

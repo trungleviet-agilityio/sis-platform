@@ -1,8 +1,8 @@
 """Cross-field checks for an adapter result line (contract v1). Stdlib only, Python 3.9 compatible.
 
 The JSON Schemas in this directory stay inside the Z4 keyword subset, so rules that relate two
-fields live here.
-The Phase 2 conformance suite (K7) imports this module; so do the schema tests.
+fields live here. The Phase 2 conformance suite (K7) imports this module; so do the schema
+tests.
 
     from contract_check import check_line
     problems = check_line(doc, verb="deploy", exit_code=0, inputs=os.environ)
@@ -51,8 +51,8 @@ def check_line(
 ) -> list[str]:
     """Schema plus cross-field rules. Returns a list of problem strings (empty means valid).
 
-    verb: the verb that ran. exit_code: its exit code. inputs: a mapping of the SIS_* variables it
-    ran with.
+    verb: the verb that ran. exit_code: its exit code.
+    inputs: a mapping of the SIS_* variables it ran with.
     """
     out = [i.message for i in z4.validate(doc, load_schema("result.schema.json"))]
     if out:

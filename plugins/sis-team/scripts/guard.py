@@ -2,16 +2,12 @@
 """PreToolUse guard: block commands that change AWS or GitHub state, and reads of secret files.
 
 Layer 3 of the guardrails (ADR 0001 B8, ADR 0002 S2). Permission deny rules match the command text
-as
-written, so `terraform -chdir=envs/dev apply` or `bash -c '...'` slip past them. This hook parses
-the
-whole command instead: it splits it into simple commands outside quotes, strips prefixes (`env`,
-`sudo`,
-`VAR=x`, `then`, ...), recurses into `bash -c`, `eval`, `python -c`, `$(...)` and `xargs`, and
-checks the
-tokens. Quoted text (a commit message, a heredoc body) is not a command. Exit code 2 blocks the
-call and
-shows stderr to Claude. Any internal error also blocks (fail closed) for Bash and the write tools.
+as written, so `terraform -chdir=envs/dev apply` or `bash -c '...'` slip past them. This hook
+parses the whole command instead: it splits it into simple commands outside quotes, strips
+prefixes (`env`, `sudo`, `VAR=x`, `then`, ...), recurses into `bash -c`, `eval`, `python -c`,
+`$(...)` and `xargs`, and checks the tokens. Quoted text (a commit message, a heredoc body) is not
+a command. Exit code 2 blocks the call and shows stderr to Claude. Any internal error also blocks
+(fail closed) for Bash and the write tools.
 
 The GitHub rules (merges, workflow dispatch, `gh api` writes, pushes to main) and the secret file
 rules come from the ship-it-serverless guard (its ADR 0013): the `gh` token in this shell is the
@@ -140,8 +136,7 @@ def words(segment: str) -> list[str]:
 
 
 def mask(text: str, double: bool = True) -> str:
-    """Blank the inside of quoted strings (same length), so quoted text is never matched as a
-    command.
+    """Blank the inside of quoted strings (same length), so quoted text never matches as a command.
 
     With double=False only single quotes are blanked (a `$(...)` inside double quotes still runs).
     """
@@ -179,12 +174,11 @@ def mask(text: str, double: bool = True) -> str:
 
 
 def split_segments(text: str) -> list[tuple[str, bool, bool]]:
-    """Split on ; | & newline ( ) and backtick outside quotes. `&&` and `||` fall out of the same
-    rule.
+    """Split on ; | & newline ( ) and backtick outside quotes.
 
-    Each item is (segment, piped, procsub): piped when a single `|` came right before it, procsub
-    when
-    it ends in `<` and a `(` follows (a process substitution feeds it).
+    `&&` and `||` fall out of the same rule. Each item is (segment, piped, procsub): piped when a
+    single `|` came right before it, procsub when it ends in `<` and a `(` follows (a process
+    substitution feeds it).
     """
     segs: list[tuple[str, bool, bool]] = []
     cur: list[str] = []
@@ -287,8 +281,7 @@ def strip_heredocs(command: str) -> tuple[str, list[tuple[str, str]]]:
 
 
 def strip_prefix(toks: list[str]) -> list[str]:
-    """Drop VAR=val, compound-command words and wrappers (env, sudo, nice, timeout) from the
-    front."""
+    """Drop VAR=val, compound-command words and wrappers (env, sudo, nice, timeout) up front."""
     t = list(toks)
     valued = {
         "env": {"-u", "-C", "-S"},
@@ -367,8 +360,9 @@ def scratch_root(path: str | None = None) -> str | None:
 
 
 def extra_roots() -> list[str]:
-    """Directories from SIS_GUARD_EXTRA_ROOTS; `/`, the home directory and the temp roots are
-    refused."""
+    """Directories from SIS_GUARD_EXTRA_ROOTS.
+
+    `/`, the home directory and the temp roots are refused."""
     refused = {"/", _norm_home(), os.path.realpath("/tmp"), "/private/tmp", "/tmp"}  # noqa: S108
     roots = []
     for extra in os.environ.get("SIS_GUARD_EXTRA_ROOTS", "").split(os.pathsep):
@@ -386,8 +380,9 @@ def allowed_roots(cwd: str) -> list[str]:
 
 
 def resolve(path: str, cwd: str) -> str | None:
-    """Absolute real path, or None when the text holds a variable or substitution we cannot
-    expand."""
+    """Absolute real path, or None when the text holds a variable or substitution.
+
+    Those cannot be expanded here."""
     expanded = os.path.expandvars(os.path.expanduser(path))
     if "$" in expanded or "`" in expanded:
         return None
@@ -449,8 +444,9 @@ def find_problem(args: list[str], cwd: str, roots: list[str]) -> str | None:
 
 
 def cd_target(toks: list[str], cwd: str) -> str | None:
-    """The directory a plain `cd <dir>` moves to, "" when it cannot be resolved, None if not a
-    cd."""
+    """The directory a plain `cd <dir>` moves to.
+
+    "" when it cannot be resolved, None if the command is not a cd."""
     if not toks or toks[0] != "cd":
         return None
     rest = [a for a in toks[1:] if a != "--"]
@@ -731,8 +727,7 @@ def shell_input_problem(
     """Check a shell or `source` that takes its script from somewhere other than `-c`.
 
     Returns a block code, 0 when the script was a literal here-string that passed the scan, or None
-    when
-    the command is not a shell reading input (nothing to do).
+    when the command is not a shell reading input (nothing to do).
     """
     is_shell = leader in SHELLS
     if not is_shell and leader not in ("source", "."):
@@ -839,8 +834,8 @@ def check_bash(command: str, cwd: str, depth: int = 0) -> int:
                 label, "Use the environment or the Keychain through the tool, never a literal."
             )
     text, bodies = strip_heredocs(command)
-    # Layer 1: the verbs anywhere outside quotes and heredocs (catches grammar the parser does not
-    # know).
+    # Layer 1: the verbs anywhere outside quotes and heredocs (catches grammar the parser does
+    # not know).
     masked = mask(text)
     for pattern, label in BLOCKED:
         if re.search(pattern, masked):
