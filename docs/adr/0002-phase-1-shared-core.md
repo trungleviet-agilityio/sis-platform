@@ -570,6 +570,27 @@ Stays (C) until the checkpoint, in addition to the list above: the size of the g
 6144-character limit, the `sha_pinning_required` field in the Actions permissions API, Administration read for
 rulesets, and the event refusal of AA3 in a live run.
 
+## Amendment B (2026-11-04, proposed): decisions from the wave 2 build and verify
+
+- Status: proposed (owner to accept with the wave 2 PRs)
+- Source: peer reviews of 1h and 1f-1, and the wave 2 verify (e2e release simulation, security review).
+
+| # | Decision | Amends | Pillars |
+|---|---|---|---|
+| AB1 | `intake/sis_intake/__init__.py` holds only a docstring and `__version__` (a test parses it with `ast`) and is excluded from the closure (`:(exclude,glob)`). Without this, L4 (version = tag) moves `workflow_sha` on every release and no patch release is possible under L7 | L2, L4, L7 | OPS |
+| AB2 | `scripts/tf/check.sh` is not in the closure: it is a module-development check that runs tests outside the closure. Reusable workflows call `scripts/tf/policy.py` and `scripts/tf/resolved-sources.sh` directly | AA4 | OPS |
+| AB3 | `closure.txt` lines are only `:(glob)<path>` or `:(exclude,glob)<path>`; any other pathspec magic is refused. `workflow_sha` requires linear history (squash merges); a history with merge commits is refused | L2 | REL |
+| AB4 | `resolved-sources.sh` requires sis-platform module sources to match the lock's `release_sha` exactly, not any 40-hex value | H9, L3 | SEC |
+| AB5 | Offline L3 also refuses: a module `source` that is not one plain string literal; local sources through `.terraform` or `.git`, or that resolve outside the repo; symlinked directories or symlinks leaving the repo; duplicate YAML keys; a sis-platform `uses:` path other than `.github/workflows/reusable-*.yml`; `*.tf.json`, `.tofu` and every `action.yml` are scanned | L3 | SEC |
+| AB6 | Release prep bumps all three version files (`intake/.claude-plugin/plugin.json`, `plugins/sis-team/.claude-plugin/plugin.json`, `intake/sis_intake/__init__.py`) to the tag; `check_release.py` reads plugin roots from `marketplace.json`. A patch release needs an ancestor previous tag | L4, L7 | OPS |
+| AB7 | mypy 2.x no longer type-checks against a Python 3.9 target; 3.9 compatibility is enforced by running every test suite on Python 3.9 (accepted) | Z3 | OPS |
+| AB8 | Requirements for 1f-2: no `uses: ./` in reusable workflows (H rule exists); sparse-checkout patterns are derived from `closure.txt`; `plan-summary.sh` and `assert-no-account-id.sh` live in closure paths; PyYAML and tool installs inside workflows are pinned and hash-checked; `check_lock.py --remote` runs as the required W5 check | W, O11 | SEC |
+
+Accepted residual risks: offline L3 trusts the lock values a PR commits (only `--remote`, a required check, proves
+they are released); a consumer can vendor platform code through local paths; a third-party wrapper workflow calling
+sis-platform at another SHA is invisible to L3 (IAM `job_workflow_ref`, O9, is the enforcement); tag integrity relies
+on the immutable tag ruleset.
+
 ## Change log
 
 | Date | Change |
@@ -577,3 +598,4 @@ rulesets, and the event refusal of AA3 in a live run.
 | 2026-11-04 | Drafted |
 | 2026-11-04 | Revised after challenger review C1 to C27: every trusted SHA checked remotely (L3); both environments gated, public canary (F30); claims smoke before any account (O12); trust moves batched (L7); fail-closed sparse closure (L2, O11); plan role denies and prod plan from `main` (T4, O14); escalation lint and boundary (T11); one full policy linter (T8); promotion deferred (T6); environment secret mechanism documented with a fallback (O13, F29); detective baseline (T7); ECR lifecycle (T5); separate board token (B16) and a before-build checkpoint; parallel sub-PR waves; WA findings added (M10, D18 to D21, H10, B14) or recorded with their phase |
 | 2026-11-04 | Amendment A: decisions from the wave 1 build and verify (accepted by the owner) |
+| 2026-11-04 | Amendment B (proposed): decisions from the wave 2 build and verify |
