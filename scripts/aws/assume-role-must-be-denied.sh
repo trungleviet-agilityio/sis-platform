@@ -28,7 +28,7 @@ for role in "$@"; do
 done
 require_cmd aws "the AWS CLI is preinstalled on GitHub-hosted runners"
 
-token="$(oidc_token)"
+token="$(oidc_token)" || exit 1
 printf 'claim sub: %s\n' "$(jwt_claim "$token" sub)"
 printf 'claim job_workflow_ref: %s\n' "$(jwt_claim "$token" job_workflow_ref)"
 

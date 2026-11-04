@@ -1,11 +1,7 @@
 # shellcheck shell=bash
-# Credit: adapted from ship-it-safely scripts/lib.sh (oidc_token, jwt_claim, run_capture, assert_denied; lab ADR 0007
-# S31). OIDC helpers for scripts/aws/*.sh. Source it after scripts/lib.sh; do not run it. Bash 3.2 compatible.
-
-# mask <value>: hide a value in every later log line of a GitHub job. Prints nothing outside GitHub Actions.
-mask() {
-  if [ -n "${GITHUB_ACTIONS:-}" ]; then printf '::add-mask::%s\n' "$1"; fi
-}
+# Credit: adapted from ship-it-safely scripts/lib.sh (oidc_token, jwt_claim; lab ADR 0007 S31).
+# OIDC helpers for scripts/aws/*.sh. Source it after scripts/lib.sh (mask, redact_ids); do not run it.
+# Bash 3.2 compatible.
 
 # oidc_token: print the job's GitHub OIDC token for the STS audience (needs id-token: write) and mask it.
 oidc_token() {
@@ -30,6 +26,3 @@ jwt_claim() {
   while [ $((${#payload} % 4)) -ne 0 ]; do payload="${payload}="; done
   printf '%s' "$payload" | base64 -d 2>/dev/null | jq -r --arg claim "$2" '.[$claim] // empty | tostring'
 }
-
-# redact_ids: replace every run of 12 digits on stdin with <redacted>, so AWS error text can be logged.
-redact_ids() { sed -E 's/[0-9]{12}/<redacted>/g'; }

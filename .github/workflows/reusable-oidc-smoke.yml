@@ -60,12 +60,19 @@ jobs:
           allowed-endpoints: >
             github.com:443
 
-      - name: Assert the job runs a sis-platform reusable workflow and a known check (O11)
+      # O12: the smoke runs on main by dispatch, so its sub, ref and repository_id are those an apply carries.
+      - name: Assert a dispatch on main, a sis-platform reusable workflow and a known check (O11, O12)
         env:
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
           JOB_REPOSITORY: ${{ job.workflow_repository }}
           JOB_FILE: ${{ job.workflow_file_path }}
           CHECK: ${{ inputs.check }}
         run: |
+          if [ "$EVENT" != "workflow_dispatch" ] || [ "$REF" != "refs/heads/main" ]; then
+            echo "::error::the OIDC smoke runs only by workflow_dispatch on refs/heads/main, not ${EVENT} on ${REF} (O12)"
+            exit 1
+          fi
           if [ "$JOB_REPOSITORY" != "trungleviet-agilityio/sis-platform" ]; then
             echo "::error::job.workflow_repository is not trungleviet-agilityio/sis-platform"
             exit 1

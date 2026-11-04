@@ -330,5 +330,59 @@ class InputTests(unittest.TestCase):
         self.assertIn("P01", out)
 
 
+def write_plan(directory: Path, changes: List[object], name: str = "plan.json") -> str:
+    path = directory / name
+    path.write_text(
+        json.dumps({"format_version": "1.2", "resource_changes": changes}), encoding="utf-8"
+    )
+    return str(path)
+
+
+class AllowNoPolicyTests(unittest.TestCase):
+    """--allow-no-policy, used by the reusable plan and apply workflows (ADR 0002 W3)."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.dir = Path(self.tmp.name)
+        self.data = write_plan(
+            self.dir,
+            [{"address": "terraform_data.x", "type": "terraform_data", "change": {}}],
+        )
+
+    def test_a_plan_without_policies_is_still_exit_2_without_the_flag(self) -> None:
+        code, out = run_main([self.data, "--boundary-arn", BOUNDARY])
+        self.assertEqual(code, 2)
+        self.assertIn("no IAM policy found in the input", out)
+
+    def test_a_plan_without_policies_passes_with_the_flag(self) -> None:
+        code, out = run_main([self.data, "--boundary-arn", BOUNDARY, "--allow-no-policy"])
+        self.assertEqual(code, 0, out)
+        self.assertIn("the plan creates or changes no IAM policy", out)
+
+    def test_the_flag_still_lints_a_plan_with_policies(self) -> None:
+        bad = json.dumps({"Statement": [{"Effect": "Allow", "Action": "*", "Resource": "*"}]})
+        path = write_plan(
+            self.dir,
+            [
+                {
+                    "address": "aws_iam_policy.admin",
+                    "type": "aws_iam_policy",
+                    "change": {"actions": ["create"], "after": {"policy": bad}},
+                }
+            ],
+            "bad.json",
+        )
+        code, out = run_main([path, "--boundary-arn", BOUNDARY, "--allow-no-policy"])
+        self.assertEqual(code, 1)
+        self.assertIn("P01", out)
+
+    def test_the_flag_refuses_an_input_that_is_not_a_plan(self) -> None:
+        doc = write_doc(self.dir, [{"Effect": "Allow", "Action": "s3:GetObject", "Resource": "x"}])
+        code, out = run_main([doc, "--allow-no-policy"])
+        self.assertEqual(code, 2)
+        self.assertIn("not the JSON of terraform show -json (--allow-no-policy)", out)
+
+
 if __name__ == "__main__":
     unittest.main()

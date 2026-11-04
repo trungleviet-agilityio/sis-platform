@@ -12,6 +12,7 @@ JOB_WORKFLOW_FILE_PATH and JOB_WORKFLOW_SHA. Checks, in order:
        40-hex SHA
   O11  that SHA is in the caller's committed platform.lock `trusted_workflow_shas` (schema per L1)
   M8   the manifest is valid under `--context lint` (the validator at the same SHA)
+  M7   the caller's project.env sets SIS_PROJECT_PREFIX once, equal to M6 `project.prefix`
   M6   ENV is an env of the plan; family, region, prefix and role names have their documented
        shape, and the role names are <prefix>-<env>-gha-{plan,apply,deploy}
   W2   with --families, the runtime family is one the calling workflow has a job for; otherwise
@@ -104,6 +105,21 @@ def checked(problems: List[str], name: str, value: Any, pattern: re.Pattern[str]
     return text
 
 
+def project_env_prefix(caller: str) -> Tuple[Optional[str], List[str]]:
+    """M7: SIS_PROJECT_PREFIX from the caller's project.env (KEY=VALUE lines, # comments)."""
+    text, errs = check_lock.read_text(caller, "project.env")
+    if text is None:
+        return None, [f"{e} (M7: project.env must hold SIS_PROJECT_PREFIX)" for e in errs]
+    values = [
+        line.split("=", 1)[1].strip().strip("\"'")
+        for line in text.splitlines()
+        if line.strip().startswith("SIS_PROJECT_PREFIX=")
+    ]
+    if len(values) != 1:
+        return None, ["project.env must set SIS_PROJECT_PREFIX exactly once (M7)"]
+    return values[0], []
+
+
 def resolve_env(caller: str, env: str, tfvars: Optional[str]) -> Tuple[Dict[str, str], List[str]]:
     manifest = os.path.join(caller, "platform.yaml")
     code, out, err = run_validator(manifest, "--json", "--context", "lint")
@@ -120,13 +136,21 @@ def resolve_env(caller: str, env: str, tfvars: Optional[str]) -> Tuple[Dict[str,
         ]
         detail = "; ".join(lines) or err.strip() or f"exit code {code}"
         return {}, [f"platform.yaml is not valid under --context lint (M8): {detail}"]
+    project: Dict[str, Any] = plan["project"] if isinstance(plan.get("project"), dict) else {}
+    declared, problems = project_env_prefix(caller)
+    if declared is not None and declared != project.get("prefix"):
+        problems.append(
+            f"project.env SIS_PROJECT_PREFIX '{declared}' differs from platform.yaml "
+            f"project.prefix '{project.get('prefix')}' (M7)"
+        )
+    if problems:
+        return {}, problems
     envs: Dict[str, Any] = plan["envs"] if isinstance(plan.get("envs"), dict) else {}
     if env not in envs:
         return {}, [f"env '{env}' is not an env of platform.yaml (M6)"]
     slice_: Dict[str, Any] = envs[env] if isinstance(envs[env], dict) else {}
     runtime: Dict[str, Any] = plan["runtime"] if isinstance(plan.get("runtime"), dict) else {}
     roles: Dict[str, Any] = slice_["roles"] if isinstance(slice_.get("roles"), dict) else {}
-    problems: List[str] = []
     out_map = {
         "env": env,
         "family": checked(problems, "runtime.family", runtime.get("family"), FAMILY_RE),

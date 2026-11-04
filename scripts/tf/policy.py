@@ -30,6 +30,10 @@ Rules (a statement is checked when its Effect is Allow):
   P00 a policy that is unknown at plan time cannot be checked (fails closed; `--unknown warn`
       only reports it)
 
+`--allow-no-policy` (the reusable plan and apply workflows): every input must be a Terraform plan
+(`format_version` present), and a plan that creates or changes no IAM policy passes with a note
+instead of exit 2. Without the flag, behavior is unchanged.
+
 The `<prefix>-<env>` name and the account are derived from the boundary ARN
 (`policy/<prefix>-<env>-workload-boundary`), so P07, P10 and P11 need `--boundary-arn` (or a fixture
 `boundary_arn`) to accept any scoped resource.
@@ -407,7 +411,9 @@ def collect(
     raise InputError(f"{origin}: not a plan, a fixture or a policy document")
 
 
-def run(paths: List[str], boundary_arn: Optional[str], unknown: str) -> Tuple[int, List[str]]:
+def run(
+    paths: List[str], boundary_arn: Optional[str], unknown: str, allow_no_policy: bool = False
+) -> Tuple[int, List[str]]:
     lines: List[str] = []
     failed = False
     checked = 0
@@ -418,6 +424,10 @@ def run(paths: List[str], boundary_arn: Optional[str], unknown: str) -> Tuple[in
             else:
                 with open(path, encoding="utf-8") as handle:
                     data = json.load(handle)
+            if allow_no_policy and not (isinstance(data, dict) and "format_version" in data):
+                raise InputError(
+                    f"{path}: not the JSON of terraform show -json (--allow-no-policy)"
+                )
             docs, file_boundary = collect(data, path)
             boundary = boundary_arn or file_boundary
             for name, policy in docs:
@@ -433,6 +443,8 @@ def run(paths: List[str], boundary_arn: Optional[str], unknown: str) -> Tuple[in
         except (OSError, json.JSONDecodeError, InputError) as exc:
             return 2, [f"error: {path}: {exc}"]
     if checked == 0:
+        if allow_no_policy:
+            return 0, ["ok  policy lint: the plan creates or changes no IAM policy"]
         return 2, ["error: no IAM policy found in the input"]
     return (1 if failed else 0), lines
 
@@ -449,8 +461,13 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument(
         "--unknown", choices=("fail", "warn"), default="fail", help="policies unknown at plan time"
     )
+    parser.add_argument(
+        "--allow-no-policy",
+        action="store_true",
+        help="inputs must be Terraform plans; one with no IAM policy passes (reusable workflows)",
+    )
     args = parser.parse_args(argv)
-    code, lines = run(args.files, args.boundary_arn, args.unknown)
+    code, lines = run(args.files, args.boundary_arn, args.unknown, args.allow_no_policy)
     for line in lines:
         sys.stderr.write(line + "\n")
     if code == 0:

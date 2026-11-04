@@ -25,7 +25,7 @@ for claim in "$@"; do
   esac
 done
 
-token="$(oidc_token)"
+token="$(oidc_token)" || exit 1
 for claim in "$@"; do
   printf 'claim %s: %s\n' "$claim" "$(jwt_claim "$token" "$claim" | redact_ids)"
 done

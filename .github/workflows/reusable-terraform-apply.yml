@@ -115,6 +115,9 @@ jobs:
           path: caller
           persist-credentials: false
 
+      # Trust (job.workflow_sha in trusted_workflow_shas), validator (lint), project.env and the M6 values, before any
+      # credential. --tfvars here is not used later (jobs share no disk): it fails a broken M7 emit before the
+      # environment approval is requested.
       - name: Resolve the plan
         id: resolve
         env:
@@ -142,6 +145,9 @@ jobs:
     concurrency:
       group: tf-${{ inputs.env }}
       cancel-in-progress: false
+    env:
+      # Provider installation from the hashicorp namespace only; no implied local mirrors (closure file).
+      TF_CLI_CONFIG_FILE: ${{ github.workspace }}/.platform/scripts/platform/terraformrc
     steps:
       - name: Harden runner
         uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
@@ -238,7 +244,37 @@ jobs:
           printf '%s\n' "$out" >> "$GITHUB_OUTPUT"
 
       - name: Install terraform (checksum verified)
-        run: '"$GITHUB_WORKSPACE/.platform/scripts/platform/install-terraform.sh" "$RUNNER_TEMP/bin"'
+        run: |
+          "$GITHUB_WORKSPACE/.platform/scripts/platform/install-terraform.sh" "$RUNNER_TEMP/bin"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+
+      # Before any credential: providers from the hashicorp namespace only (TF_CLI_CONFIG_FILE), init without the
+      # backend, then what init really resolved (local or sis-platform at release_sha, AB4), then validate.
+      - name: Terraform init without backend, resolved sources, validate (no credentials)
+        working-directory: caller
+        env:
+          ENV_NAME: ${{ steps.resolve.outputs.env }}
+          RELEASE_SHA: ${{ steps.resolve.outputs.release_sha }}
+          TF_DATA_DIR: ${{ runner.temp }}/tf-data
+        run: '"$GITHUB_WORKSPACE/.platform/scripts/platform/tf-init.sh" sources'
+
+      # S1: a re-run of an old run would apply a stale commit. The caller repo is public (F30), so an anonymous
+      # ls-remote over github.com (already on the egress list) reads the main tip.
+      - name: Refuse a commit that is not the current main tip (stale re-run)
+        env:
+          REPO: ${{ github.repository }}
+          RUN_SHA: ${{ github.sha }}
+          GIT_TERMINAL_PROMPT: "0"
+        run: |
+          tip="$(git ls-remote "https://github.com/${REPO}.git" refs/heads/main | cut -f1)"
+          if ! [[ "$tip" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::cannot read the main tip of ${REPO}"
+            exit 1
+          fi
+          if [ "$tip" != "$RUN_SHA" ]; then
+            echo "::error::this run is for ${RUN_SHA}, but main is now at ${tip}: refusing a stale apply"
+            exit 1
+          fi
 
       - name: Assume the apply role
         uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
@@ -249,7 +285,8 @@ jobs:
           mask-aws-account-id: true
           retry-max-attempts: 3
 
-      - name: Terraform init and resolved sources
+      # The backend composed at run time (T3), then resolved-sources.sh again on what this init resolved.
+      - name: Terraform init with the backend
         working-directory: caller
         env:
           ACCOUNT: ${{ secrets.AWS_ACCOUNT_ID }}
@@ -258,20 +295,18 @@ jobs:
           PREFIX: ${{ steps.resolve.outputs.prefix }}
           RELEASE_SHA: ${{ steps.resolve.outputs.release_sha }}
           TF_DATA_DIR: ${{ runner.temp }}/tf-data
-        run: |
-          export PATH="$RUNNER_TEMP/bin:$PATH"
-          "$GITHUB_WORKSPACE/.platform/scripts/platform/tf-init.sh"
-          "$GITHUB_WORKSPACE/.platform/scripts/tf/resolved-sources.sh" "infra/envs/$ENV_NAME" "$TF_DATA_DIR" "$RELEASE_SHA"
+        run: '"$GITHUB_WORKSPACE/.platform/scripts/platform/tf-init.sh" backend'
 
       - name: Terraform plan
         working-directory: caller
         env:
           ENV_NAME: ${{ steps.resolve.outputs.env }}
           TF_DATA_DIR: ${{ runner.temp }}/tf-data
+        # Raw output stays in a file; a failure prints it with account-like runs redacted (tf-run.sh).
         run: |
-          export PATH="$RUNNER_TEMP/bin:$PATH"
-          terraform -chdir="infra/envs/$ENV_NAME" plan -input=false -no-color -lock-timeout=5m \
-            -var-file="$RUNNER_TEMP/platform.tfvars.json" -out="$RUNNER_TEMP/tfplan"
+          "$GITHUB_WORKSPACE/.platform/scripts/platform/tf-run.sh" plan -chdir="infra/envs/$ENV_NAME" plan \
+            -input=false -no-color -lock-timeout=5m -var-file="$RUNNER_TEMP/platform.tfvars.json" \
+            -out="$RUNNER_TEMP/tfplan"
 
       # The lint runs on the exact plan that is applied next (T11).
       - name: Policy lint and account-free summary
@@ -282,9 +317,8 @@ jobs:
           PREFIX: ${{ steps.resolve.outputs.prefix }}
           TF_DATA_DIR: ${{ runner.temp }}/tf-data
         run: |
-          export PATH="$RUNNER_TEMP/bin:$PATH"
           terraform -chdir="infra/envs/$ENV_NAME" show -json "$RUNNER_TEMP/tfplan" > "$RUNNER_TEMP/tfplan.json"
-          python3 -I "$GITHUB_WORKSPACE/.platform/scripts/platform/plan-policy.py" "$RUNNER_TEMP/tfplan.json" \
+          python3 -I "$GITHUB_WORKSPACE/.platform/scripts/tf/policy.py" "$RUNNER_TEMP/tfplan.json" --allow-no-policy \
             --boundary-arn "arn:aws:iam::${ACCOUNT}:policy/${PREFIX}-${ENV_NAME}-workload-boundary"
           "$GITHUB_WORKSPACE/.platform/scripts/platform/plan-summary.sh" --title "Terraform apply (${ENV_NAME})" \
             < "$RUNNER_TEMP/tfplan.json" | "$GITHUB_WORKSPACE/.platform/scripts/aws/assert-no-account-id.sh" \
@@ -296,8 +330,8 @@ jobs:
           ENV_NAME: ${{ steps.resolve.outputs.env }}
           TF_DATA_DIR: ${{ runner.temp }}/tf-data
         run: |
-          export PATH="$RUNNER_TEMP/bin:$PATH"
-          terraform -chdir="infra/envs/$ENV_NAME" apply -input=false -no-color -lock-timeout=5m "$RUNNER_TEMP/tfplan"
+          "$GITHUB_WORKSPACE/.platform/scripts/platform/tf-run.sh" apply -chdir="infra/envs/$ENV_NAME" apply \
+            -input=false -no-color -lock-timeout=5m "$RUNNER_TEMP/tfplan"
 
       - name: Remove the plan files
         if: always()

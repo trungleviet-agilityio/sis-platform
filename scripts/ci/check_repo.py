@@ -26,6 +26,9 @@ Workflow rules:
   H8  workflow concurrency cancels in progress only for pull_request, never for pushes
   H10 a job with `id-token: write` or an `environment` sits under a concurrency group with
       `cancel-in-progress: false`
+  AA3 in reusable-terraform-apply.yml, the `resolve` job and every credentialed job start (after
+      harden-runner) with a step that refuses events other than push and workflow_dispatch and
+      refs other than refs/heads/main
 
 Exit 0 when clean, 1 with one message per finding on stderr, 2 on usage errors.
 Needs PyYAML (workflow and repo modes).
@@ -399,6 +402,39 @@ def reusable_problems(path: str, text: str, doc: Any) -> list[str]:
     return problems
 
 
+APPLY_FILE = "reusable-terraform-apply.yml"
+
+
+def squash(value: Any) -> str:
+    return re.sub(r"\s+", "", str(value))
+
+
+def apply_gate_problems(job: dict[str, Any]) -> list[str]:
+    """AA3: in the apply workflow, the step after harden-runner refuses other events and refs.
+
+    Literal on purpose: env EVENT is github.event_name, env REF is github.ref, and the script holds
+    the case arm `push | workflow_dispatch) ;;` and the test `"$REF" != "refs/heads/main"`.
+    """
+    steps = job.get("steps")
+    step = steps[1] if isinstance(steps, list) and len(steps) > 1 else None
+    env = step.get("env") if isinstance(step, dict) else None
+    run = step.get("run") if isinstance(step, dict) else None
+    ok = (
+        isinstance(env, dict)
+        and squash(env.get("EVENT")) == "${{github.event_name}}"
+        and squash(env.get("REF")) == "${{github.ref}}"
+        and isinstance(run, str)
+        and "push | workflow_dispatch) ;;" in run
+        and '"$REF" != "refs/heads/main"' in run
+    )
+    if ok:
+        return []
+    return [
+        "the step after harden-runner must refuse events other than push and workflow_dispatch "
+        "and refs other than refs/heads/main (AA3)"
+    ]
+
+
 def check_workflow(path: str) -> list[str]:
     text, doc, problems = parse_yaml(path)
     if problems:
@@ -454,6 +490,8 @@ def check_workflow(path: str) -> list[str]:
             continue
         problems += [f"{here}: {m}" for m in harden_problems(job, credentialed)]
         problems += [f"{here}: {m}" for m in checkout_problems(job, reusable)]
+        if base == APPLY_FILE and (job_id == "resolve" or credentialed):
+            problems += [f"{here}: {m}" for m in apply_gate_problems(job)]
         gated = family_gated(job.get("if", ""))
         if credentialed and reusable and base not in FAMILY_EXEMPT and not gated:
             problems.append(

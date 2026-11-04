@@ -2,11 +2,12 @@
 # Credit: adapted from ship-it-serverless scripts/tf/plan-summary.sh (lab ADR 0004, E22 and E23).
 # Account-free summary of a Terraform plan for the job summary and the PR comment (ADR 0002 W3). Reads
 # `terraform show -json <plan>` on stdin and prints markdown: counts and one row per changed resource (action and
-# address only, never attribute values). A consumer repo is public, so a standalone 12-digit run (a possible AWS
-# account ID) fails the script instead of being printed. Pipe the result through scripts/aws/assert-no-account-id.sh
-# too, which also checks the exact account.
+# address only, never attribute values). A consumer repo is public: always pipe the result through
+# scripts/aws/assert-no-account-id.sh, which refuses the exact account and any account-ID-like run (the workflows run
+# with pipefail, so either script failing fails the step).
 #
-# Usage: terraform show -json tfplan | scripts/platform/plan-summary.sh --title <heading text>
+# Usage: terraform show -json tfplan | scripts/platform/plan-summary.sh --title <heading text> \
+#          | ACCOUNT=... scripts/aws/assert-no-account-id.sh
 
 # shellcheck source=scripts/lib.sh
 source "$(dirname "$0")/../lib.sh"
@@ -16,7 +17,6 @@ usage="usage: terraform show -json tfplan | scripts/platform/plan-summary.sh --t
 { [ $# -eq 2 ] && [ "$1" = "--title" ] && [ -n "$2" ]; } || die "$usage"
 title="$2"
 max_rows=200
-account_id_re='(^|[^0-9A-Za-z])[0-9]{12}([^0-9A-Za-z]|$)'
 
 input="$(cat)"
 [ -n "$input" ] || die "no plan JSON on stdin"
@@ -45,9 +45,4 @@ program='
        (if ($c | length) > $max then "", "Showing the first \($max) of \($c | length) changes." else empty end)
      end)
 '
-summary="$(printf '%s' "$input" | jq -r --argjson max "$max_rows" --arg title "$title" "$program")"
-
-if printf '%s\n' "$summary" | grep -Eq "$account_id_re"; then
-  die "plan summary contains a 12-digit number (possible account ID); not printing it"
-fi
-printf '%s\n' "$summary"
+printf '%s' "$input" | jq -r --argjson max "$max_rows" --arg title "$title" "$program"
