@@ -54,6 +54,6 @@ rules in `.claude/rules/` load with the files they cover.
 | Agent | Owns |
 |---|---|
 | `backend-dev` | `intake/**` (manifest schema, validator, rules, intake plugin; Python) |
-| `devops-engineer` | `modules/**`, `adapters/**`, `.github/**`, `.claude-plugin/**`, `templates/**`, `Makefile`, `.pre-commit-config.yaml`, `pyproject.toml`, `mise.toml`, `scripts/**` |
+| `devops-engineer` | `modules/**`, `adapters/**`, `plugins/**`, `examples/**`, `project.env`, `.github/**`, `.claude-plugin/**`, `templates/**`, `Makefile`, `.pre-commit-config.yaml`, `pyproject.toml`, `mise.toml`, `scripts/**` |
 
 Verify agents never edit files; `reviewer` also checks docs drift.
