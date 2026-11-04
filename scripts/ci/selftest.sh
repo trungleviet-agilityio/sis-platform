@@ -74,9 +74,11 @@ expect_pass workflow "$fx/examples/consumer/.github/workflows/good.yml"
 expect_fail workflow "$fx/examples/consumer/.github/workflows/bad-input.yml" "workflow_dispatch input 'ref' is not allowed"
 expect_fail workflow "$fx/examples/consumer/.github/workflows/bad-env-type.yml" "input 'env' must be type: choice"
 expect_fail workflow "$fx/aa3/reusable-terraform-apply.yml" \
-  "job 'apply-lambda': the step after harden-runner must refuse events other than push and workflow_dispatch and refs other than refs/heads/main (AA3)"
+  "job 'apply-lambda': the step after harden-runner must be the AA3 gate"
 out="$(trap - ERR; "$py" -I "$guard" workflow "$fx/aa3/reusable-terraform-apply.yml" 2>&1)" || true
-case "$out" in *"job 'resolve'"*) die "selftest: the AA3 rule flagged a resolve job that has the gate" ;; esac
+case "$out" in *"job 'resolve'"*) die "selftest: the AA3 rule flagged a resolve job that has the canonical gate" ;; esac
+expect_fail workflow "$fx/aa3-if/reusable-terraform-apply.yml" "job 'resolve': the AA3 gate step must not set \`if:\`"
+expect_fail workflow "$fx/aa3-exit0/reusable-terraform-apply.yml" "job 'resolve': the step after harden-runner must be the AA3 gate"
 expect_pass workflow "$fx/examples/consumer/.github/workflows/good-schedule.yml"
 expect_fail workflow "$fx/bad-schedule.yml" "trigger 'schedule' is not allowed (only pull_request, push, workflow_call)"
 expect_pass makefile "$fx/Makefile.good"

@@ -16,15 +16,19 @@ jobs:
       - uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
         with:
           egress-policy: audit
-      - env:
+      - name: canonical gate
+        env:
           EVENT: ${{ github.event_name }}
           REF: ${{ github.ref }}
         run: |
           case "$EVENT" in
             push | workflow_dispatch) ;;
-            *) exit 1 ;;
+            *) echo "::error::apply runs only on push or workflow_dispatch, not on ${EVENT} (AA3)"; exit 1 ;;
           esac
-          if [ "$REF" != "refs/heads/main" ]; then exit 1; fi
+          if [ "$REF" != "refs/heads/main" ]; then
+            echo "::error::apply runs only from refs/heads/main, not from ${REF} (O1)"
+            exit 1
+          fi
       - id: r
         run: echo family=lambda >> "$GITHUB_OUTPUT"
   apply-lambda:
@@ -46,7 +50,8 @@ jobs:
           disable-sudo-and-containers: true
           allowed-endpoints: >
             github.com:443
-      - env:
+      - name: event check only, no ref check
+        env:
           EVENT: ${{ github.event_name }}
         run: |
           case "$EVENT" in

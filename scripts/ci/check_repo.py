@@ -403,6 +403,22 @@ def reusable_problems(path: str, text: str, doc: Any) -> list[str]:
 
 
 APPLY_FILE = "reusable-terraform-apply.yml"
+# The one accepted text of the AA3 gate step (compared with all whitespace removed).
+APPLY_GATE_RUN = """
+case "$EVENT" in
+  push | workflow_dispatch) ;;
+  *) echo "::error::apply runs only on push or workflow_dispatch, not on ${EVENT} (AA3)"; exit 1 ;;
+esac
+if [ "$REF" != "refs/heads/main" ]; then
+  echo "::error::apply runs only from refs/heads/main, not from ${REF} (O1)"
+  exit 1
+fi
+"""
+APPLY_GATE_MESSAGE = (
+    "the step after harden-runner must be the AA3 gate: env EVENT and REF only, and the run text "
+    "of APPLY_GATE_RUN in scripts/ci/check_repo.py, refusing events other than push and "
+    "workflow_dispatch and refs other than refs/heads/main (AA3)"
+)
 
 
 def squash(value: Any) -> str:
@@ -412,27 +428,29 @@ def squash(value: Any) -> str:
 def apply_gate_problems(job: dict[str, Any]) -> list[str]:
     """AA3: in the apply workflow, the step after harden-runner refuses other events and refs.
 
-    Literal on purpose: env EVENT is github.event_name, env REF is github.ref, and the script holds
-    the case arm `push | workflow_dispatch) ;;` and the test `"$REF" != "refs/heads/main"`.
+    Literal on purpose: the step's env is exactly EVENT (github.event_name) and REF (github.ref),
+    its `run` equals APPLY_GATE_RUN with whitespace ignored, and it sets no `if`,
+    `continue-on-error`, `shell`, `working-directory` or `uses` that could skip or soften it.
     """
     steps = job.get("steps")
     step = steps[1] if isinstance(steps, list) and len(steps) > 1 else None
-    env = step.get("env") if isinstance(step, dict) else None
-    run = step.get("run") if isinstance(step, dict) else None
+    if not isinstance(step, dict):
+        return [APPLY_GATE_MESSAGE]
+    problems = [
+        f"the AA3 gate step must not set `{key}:`"
+        for key in ("if", "continue-on-error", "shell", "working-directory", "uses")
+        if key in step
+    ]
+    env = step.get("env")
     ok = (
         isinstance(env, dict)
+        and set(env) == {"EVENT", "REF"}
         and squash(env.get("EVENT")) == "${{github.event_name}}"
         and squash(env.get("REF")) == "${{github.ref}}"
-        and isinstance(run, str)
-        and "push | workflow_dispatch) ;;" in run
-        and '"$REF" != "refs/heads/main"' in run
+        and isinstance(step.get("run"), str)
+        and squash(step["run"]) == squash(APPLY_GATE_RUN)
     )
-    if ok:
-        return []
-    return [
-        "the step after harden-runner must refuse events other than push and workflow_dispatch "
-        "and refs other than refs/heads/main (AA3)"
-    ]
+    return problems if ok else [*problems, APPLY_GATE_MESSAGE]
 
 
 def check_workflow(path: str) -> list[str]:

@@ -295,7 +295,8 @@ jobs:
           PREFIX: ${{ steps.resolve.outputs.prefix }}
           TF_DATA_DIR: ${{ runner.temp }}/tf-data
         run: |
-          terraform -chdir="infra/envs/$ENV_NAME" show -json "$RUNNER_TEMP/tfplan" > "$RUNNER_TEMP/tfplan.json"
+          "$GITHUB_WORKSPACE/.platform/scripts/platform/tf-run.sh" show --out "$RUNNER_TEMP/tfplan.json" \
+            -chdir="infra/envs/$ENV_NAME" show -json "$RUNNER_TEMP/tfplan"
           python3 -I "$GITHUB_WORKSPACE/.platform/scripts/tf/policy.py" "$RUNNER_TEMP/tfplan.json" --allow-no-policy \
             --boundary-arn "arn:aws:iam::${ACCOUNT}:policy/${PREFIX}-${ENV_NAME}-workload-boundary"
           summary="$("$GITHUB_WORKSPACE/.platform/scripts/platform/plan-summary.sh" --title "Terraform plan (${ENV_NAME})" \

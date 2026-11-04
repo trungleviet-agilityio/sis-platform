@@ -237,7 +237,7 @@ expect_ok "redact_ids" "arn:aws:iam::<account>:role/x id <account> sha a<account
   piped "arn:aws:iam::${fake}:role/x id 1234-5678-9012 sha a1234567890123b" redact_ids
 cfg="$tmp/terraformrc"
 cp "$ROOT/scripts/platform/terraformrc" "$cfg"
-printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >>"%s/tf-args"\nif [ "${TF_STUB_FAIL:-}" = "$2" ]; then echo "Error: AccessDenied for arn:aws:iam::%s:role/r in 1234-5678-9012"; exit 1; fi\necho "raw output for %s"\n' \
+printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >>"%s/tf-args"\nif [ "${TF_STUB_FAIL:-}" = "$2" ]; then echo "Error: AccessDenied for arn:aws:iam::%s:role/r in 1234-5678-9012" >&2; exit 1; fi\necho "raw output for %s"\n' \
   "$tmp" "$fake" "$fake" >"$bin/terraform"
 chmod +x "$bin/terraform"
 tfrun="$ROOT/scripts/platform/tf-run.sh"
@@ -251,6 +251,15 @@ lacks "failure output is redacted" "$fake" "1234-5678-9012"
 expect_fail "no CLI config" "TF_CLI_CONFIG_FILE must name the platform CLI config" \
   env PATH="$bin:$PATH" TF_CLI_CONFIG_FILE= "$tfrun" plan -chdir=x plan
 expect_fail "a bad label" "label must be" tf_env "$tfrun" "Plan;x" plan
+# --out: stdout (terraform show -json) goes to the file, stderr to the log, nothing raw to the console.
+expect_ok "show --out" "terraform show succeeded" tf_env "$tfrun" show --out "$tmp/show.json" -chdir=x show -json p
+lacks "show --out prints no raw output" "raw output for" "$fake"
+grep -qF "raw output for" "$tmp/show.json" || die "platform selftest: tf-run.sh --out did not write stdout to the file"
+expect_fail "a failing show --out prints redacted stderr" "terraform show failed (exit 1)" \
+  tf_env env TF_STUB_FAIL=show "$tfrun" show --out "$tmp/show.json" -chdir=x show -json p
+has "failing show output" "arn:aws:iam::<account>:role/r in <account>"
+lacks "failing show output is redacted" "$fake" "1234-5678-9012"
+expect_fail "--out without a file" "usage:" tf_env "$tfrun" show --out
 
 log "tf-init.sh with a stub terraform"
 work="$tmp/work"
