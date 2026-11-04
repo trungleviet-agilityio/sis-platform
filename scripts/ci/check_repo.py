@@ -19,8 +19,8 @@ Workflow rules:
       `secrets.AWS_ACCOUNT_ID*`, the region only from `needs.resolve.outputs.region` or a literal;
       a credentialed job in a reusable workflow is gated by `needs.resolve.outputs.family == '<x>'`
   H4  triggers are pull_request, push or workflow_call; a `reusable-*.yml` declares
-      workflow_call only; the consumer profile (examples/consumer) also allows
-      workflow_dispatch with the inputs env (choice), sha and digest only
+      workflow_call only; the consumer profile (examples/consumer) also allows schedule (W5
+      weekly platform check) and workflow_dispatch with the inputs env (choice), sha and digest only
   H5  a checkout of sis-platform uses `ref: ${{ job.workflow_sha }}` and a non-cone
       `sparse-checkout`
   H8  workflow concurrency cancels in progress only for pull_request, never for pushes
@@ -45,7 +45,8 @@ import sys
 from typing import Any
 
 ALLOWED_TRIGGERS = {"pull_request", "push", "workflow_call"}
-CONSUMER_TRIGGERS = ALLOWED_TRIGGERS | {"workflow_dispatch"}
+# A consumer also runs the W5 platform check weekly (schedule) and dispatches applies and smokes.
+CONSUMER_TRIGGERS = ALLOWED_TRIGGERS | {"workflow_dispatch", "schedule"}
 CONSUMER_INPUTS = ("env", "sha", "digest")
 PLATFORM_REPO = "trungleviet-agilityio/sis-platform"
 SHA_RE = re.compile(r"@[0-9a-f]{40}$")
@@ -346,7 +347,7 @@ def check_triggers(path: str, doc: dict[Any, Any], consumer: bool, reusable: boo
     allowed = CONSUMER_TRIGGERS if consumer else ALLOWED_TRIGGERS
     for trigger in sorted(triggers - allowed):
         names = "pull_request, push, workflow_call" + (
-            ", workflow_dispatch with inputs env, sha, digest" if consumer else ""
+            ", schedule, workflow_dispatch with inputs env, sha, digest" if consumer else ""
         )
         problems.append(f"{path}: trigger '{trigger}' is not allowed (only {names})")
     if reusable:

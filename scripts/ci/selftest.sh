@@ -73,6 +73,8 @@ expect_fail workflow "$fx/reusable-bad-trigger.yml" "declares trigger 'push' (on
 expect_pass workflow "$fx/examples/consumer/.github/workflows/good.yml"
 expect_fail workflow "$fx/examples/consumer/.github/workflows/bad-input.yml" "workflow_dispatch input 'ref' is not allowed"
 expect_fail workflow "$fx/examples/consumer/.github/workflows/bad-env-type.yml" "input 'env' must be type: choice"
+expect_pass workflow "$fx/examples/consumer/.github/workflows/good-schedule.yml"
+expect_fail workflow "$fx/bad-schedule.yml" "trigger 'schedule' is not allowed (only pull_request, push, workflow_call)"
 expect_pass makefile "$fx/Makefile.good"
 expect_fail makefile "$fx/Makefile.bad-apply" "apply"
 expect_fail makefile "$fx/Makefile.bad-destroy" "destroy"
@@ -208,6 +210,30 @@ cases = [(acct, True), (dashed, True), ("1234-5678-9012", False), ("123456789012
 for text, hit in cases:
     assert bool(rx.search(text)) == hit, (text, hit)
 PY
+
+log "sparse-checkout lists equal closure.txt (AB8)"
+sparse="$ROOT/scripts/ci/check_sparse.py"
+reusables=()
+for f in "$ROOT"/.github/workflows/reusable-*.yml; do
+  if [ -f "$f" ]; then reusables+=("$f"); fi
+done
+if [ ${#reusables[@]} -gt 0 ]; then
+  "$py" -I "$sparse" --closure "$ROOT/scripts/release/closure.txt" "${reusables[@]}" ||
+    die "selftest: a reusable workflow's sparse-checkout differs from closure.txt"
+fi
+out="$(trap - ERR; "$py" -I "$sparse" --closure "$ROOT/scripts/release/closure.txt" "$fx/reusable-good.yml" 2>&1)" &&
+  die "selftest: check_sparse.py should fail on a partial sparse-checkout"
+case "$out" in
+  *"sparse-checkout differs from closure.txt (missing ['/scripts/release/closure.txt'"*) ;;
+  *) die "selftest: check_sparse.py failed without the expected message. Got: $out" ;;
+esac
+printf ':(glob)a\n:(icase)b\n' >"$tmp/closure-magic.txt"
+out="$(trap - ERR; "$py" -I "$sparse" --closure "$tmp/closure-magic.txt" "$fx/reusable-good.yml" 2>&1)" &&
+  die "selftest: check_sparse.py should refuse other pathspec magic"
+case "$out" in *"is not :(glob) or :(exclude,glob)"*) ;; *) die "selftest: check_sparse.py magic message. Got: $out" ;; esac
+
+log "scripts the reusable workflows run"
+"$ROOT/scripts/ci/platform-selftest.sh"
 
 log "guard on the real repository"
 expect_pass repo "$ROOT"

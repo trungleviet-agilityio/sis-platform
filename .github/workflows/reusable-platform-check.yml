@@ -1,0 +1,92 @@
+# Reusable P9 check of a consumer repository (ADR 0002 W5, L3, O11, AB8). Consumers require it on every pull request
+# and run it weekly on a schedule. Path frozen (W1).
+#
+# No credentials, no OIDC token, no secret. `check_lock.py --remote` makes an anonymous blobless clone of the public
+# sis-platform repository and proves the lock: tag to release_sha, ancestry, the recomputed closure, and every trusted
+# workflow SHA (released, on main, no deploy workflow while DEPLOY_TRUST_ALLOWED is false). The scripts run from
+# `.platform/` at `workflow_sha`; the caller's files are checked out under `caller/` and read as data.
+# Egress stays in audit mode (the repo guard requires audit for a job without id-token: write); the list records the
+# expected hosts: github.com for the clones, and PyPI for the hash-locked PyYAML wheel.
+name: Platform check (reusable)
+
+on:
+  workflow_call:
+
+permissions: {}
+
+jobs:
+  check:
+    name: platform check
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
+        with:
+          egress-policy: audit
+          allowed-endpoints: >
+            github.com:443
+            pypi.org:443
+            files.pythonhosted.org:443
+
+      - name: Assert the job runs a sis-platform reusable workflow (O11)
+        env:
+          JOB_REPOSITORY: ${{ job.workflow_repository }}
+          JOB_FILE: ${{ job.workflow_file_path }}
+        run: |
+          if [ "$JOB_REPOSITORY" != "trungleviet-agilityio/sis-platform" ]; then
+            echo "::error::job.workflow_repository is not trungleviet-agilityio/sis-platform"
+            exit 1
+          fi
+          case "$JOB_FILE" in
+            .github/workflows/reusable-*.yml) ;;
+            *) echo "::error::job.workflow_file_path is not a reusable-*.yml workflow"; exit 1 ;;
+          esac
+
+      - name: Check out sis-platform at workflow_sha (closure only)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: trungleviet-agilityio/sis-platform
+          ref: ${{ job.workflow_sha }}
+          path: .platform
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /scripts/release/closure.txt
+            /.github/workflows/reusable-*.yml
+            /scripts/platform/**
+            /scripts/aws/**
+            /scripts/lib.sh
+            /scripts/tf/policy.py
+            /scripts/tf/resolved-sources.sh
+            /intake/sis_intake/**
+            !/intake/sis_intake/__init__.py
+            /intake/schema/**
+            /intake/rules/compat.json
+            /intake/rules/defaults.json
+            /intake/rules/rules.json
+
+      - name: Check out the caller repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: caller
+          persist-credentials: false
+
+      - name: Assert job.workflow_sha is in trusted_workflow_shas (O11)
+        env:
+          JOB_WORKFLOW_REPOSITORY: ${{ job.workflow_repository }}
+          JOB_WORKFLOW_FILE_PATH: ${{ job.workflow_file_path }}
+          JOB_WORKFLOW_SHA: ${{ job.workflow_sha }}
+        run: python3 -I "$GITHUB_WORKSPACE/.platform/scripts/platform/resolve.py" --caller caller --trust-only
+
+      # The runner's python3, so no interpreter download; the wheel is checked against the pinned hashes (AB8).
+      - name: Install PyYAML (hash locked)
+        run: |
+          python3 -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/python" -m pip install --quiet --no-deps --only-binary :all: --require-hashes \
+            -r "$GITHUB_WORKSPACE/.platform/scripts/platform/requirements.txt"
+
+      - name: P9 check with --remote (L3)
+        run: '"$RUNNER_TEMP/venv/bin/python" -I "$GITHUB_WORKSPACE/.platform/scripts/platform/check_lock.py" caller --remote'

@@ -1,0 +1,32 @@
+# OIDC claims smoke, checkpoint step 4a (ADR 0002 O12): run on main with `gh workflow run oidc-smoke.yml --ref main`
+# and approve the env's deployment. No AWS call. The job prints job_workflow_ref and the AWS_ACCOUNT_ID pass or fail
+# line; nothing secret. The caller job sets no `environment` (F29) and passes the one named secret (O13).
+name: OIDC smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      env:
+        description: Env whose GitHub environment the smoke job runs in
+        type: choice
+        options: [dev, prod]
+        required: true
+        default: dev
+
+permissions: {}
+
+jobs:
+  smoke:
+    name: oidc claims
+    permissions:
+      contents: read # the reusable jobs check out this repository
+      id-token: write # the token whose claims are printed (no AWS call)
+    concurrency:
+      group: caller-oidc-smoke-${{ inputs.env }}
+      cancel-in-progress: false
+    uses: trungleviet-agilityio/sis-platform/.github/workflows/reusable-oidc-smoke.yml@fedcba9876543210fedcba9876543210fedcba98 # v0.2.0
+    with:
+      env: ${{ inputs.env }}
+      check: claims
+    secrets:
+      AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}

@@ -1,0 +1,7 @@
+{
+  "format_version": "1.2",
+  "terraform_version": "1.17.1",
+  "resource_changes": [
+    {"address": "terraform_data.state[\"bucket-123456789012\"]", "type": "terraform_data", "change": {"actions": ["create"], "after": {}, "after_unknown": {}}}
+  ]
+}

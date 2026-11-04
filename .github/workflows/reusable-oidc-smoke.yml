@@ -1,0 +1,243 @@
+# Reusable OIDC smoke gate (ADR 0002 O12, O5, F3, F19, F29). Called by SHA from the canary repo, on main, with
+# `environment: <env>` on the job, so sub, ref and repository_id are those an apply would carry. Path frozen (W1).
+# Credit: the negative path follows ship-it-safely oidc-smoke-test.yml (lab ADR 0007 S31, S33).
+#
+# Input `check` selects exactly one path:
+#   claims    checkpoint step 4a, before any account exists. No AWS call: the only egress is github.com. Prints the
+#             non-secret claims job_workflow_ref, job_workflow_sha, sub, ref and repository_id (never the token)
+#             and job.workflow_sha; fails unless job_workflow_sha = job.workflow_sha = platform.lock workflow_sha.
+#             Last, it says whether AWS_ACCOUNT_ID reached the job (pass or fail), without printing it.
+#   negative  checkpoint step 7, after the bootstrap. It DOES call STS (unsigned AssumeRoleWithWebIdentity, nothing
+#             else) and requires an explicit AccessDenied from the env's apply and deploy roles: this file is not in
+#             their job_workflow_ref trust (O9). Runs only when the caller passes `check: negative`.
+# The family gate of W2 does not apply here (the guard exempts this file): the claims do not depend on the runtime.
+name: OIDC smoke (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      env:
+        description: The env whose GitHub environment the job runs in (dev at the Phase 1 checkpoint)
+        type: string
+        required: true
+      check:
+        description: "claims (step 4a, no AWS call) or negative (step 7, unsigned STS calls that must be denied)"
+        type: string
+        required: false
+        default: claims
+    secrets:
+      AWS_ACCOUNT_ID:
+        description: Account ID of the env (environment secret AWS_ACCOUNT_ID, O13)
+        required: true
+
+permissions: {}
+
+jobs:
+  resolve:
+    name: resolve
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      region: ${{ steps.resolve.outputs.region }}
+      workflow_sha: ${{ steps.resolve.outputs.workflow_sha }}
+      apply_role: ${{ steps.resolve.outputs.apply_role }}
+      deploy_role: ${{ steps.resolve.outputs.deploy_role }}
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
+        with:
+          egress-policy: audit
+          allowed-endpoints: >
+            github.com:443
+
+      - name: Assert the job runs a sis-platform reusable workflow and a known check (O11)
+        env:
+          JOB_REPOSITORY: ${{ job.workflow_repository }}
+          JOB_FILE: ${{ job.workflow_file_path }}
+          CHECK: ${{ inputs.check }}
+        run: |
+          if [ "$JOB_REPOSITORY" != "trungleviet-agilityio/sis-platform" ]; then
+            echo "::error::job.workflow_repository is not trungleviet-agilityio/sis-platform"
+            exit 1
+          fi
+          case "$JOB_FILE" in
+            .github/workflows/reusable-*.yml) ;;
+            *) echo "::error::job.workflow_file_path is not a reusable-*.yml workflow"; exit 1 ;;
+          esac
+          case "$CHECK" in
+            claims | negative) ;;
+            *) echo "::error::input check must be claims or negative"; exit 1 ;;
+          esac
+
+      - name: Check out sis-platform at workflow_sha (closure only)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: trungleviet-agilityio/sis-platform
+          ref: ${{ job.workflow_sha }}
+          path: .platform
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /scripts/release/closure.txt
+            /.github/workflows/reusable-*.yml
+            /scripts/platform/**
+            /scripts/aws/**
+            /scripts/lib.sh
+            /scripts/tf/policy.py
+            /scripts/tf/resolved-sources.sh
+            /intake/sis_intake/**
+            !/intake/sis_intake/__init__.py
+            /intake/schema/**
+            /intake/rules/compat.json
+            /intake/rules/defaults.json
+            /intake/rules/rules.json
+
+      - name: Check out the caller repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: caller
+          persist-credentials: false
+
+      - name: Resolve the plan
+        id: resolve
+        env:
+          JOB_WORKFLOW_REPOSITORY: ${{ job.workflow_repository }}
+          JOB_WORKFLOW_FILE_PATH: ${{ job.workflow_file_path }}
+          JOB_WORKFLOW_SHA: ${{ job.workflow_sha }}
+          ENV_NAME: ${{ inputs.env }}
+        run: |
+          python3 -I "$GITHUB_WORKSPACE/.platform/scripts/platform/resolve.py" --caller caller --env "$ENV_NAME" \
+            >> "$GITHUB_OUTPUT"
+
+  claims:
+    name: claims (step 4a, no AWS call)
+    needs: resolve
+    if: inputs.check == 'claims'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    environment: ${{ inputs.env }}
+    permissions:
+      contents: read
+      id-token: write # the OIDC token whose claims are printed; it is never sent to AWS
+    concurrency:
+      group: oidc-smoke-${{ inputs.env }}
+      cancel-in-progress: false
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
+        with:
+          egress-policy: block
+          disable-telemetry: true
+          disable-sudo-and-containers: true
+          allowed-endpoints: >
+            github.com:443
+
+      - name: Check out sis-platform at workflow_sha (closure only)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: trungleviet-agilityio/sis-platform
+          ref: ${{ job.workflow_sha }}
+          path: .platform
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /scripts/release/closure.txt
+            /.github/workflows/reusable-*.yml
+            /scripts/platform/**
+            /scripts/aws/**
+            /scripts/lib.sh
+            /scripts/tf/policy.py
+            /scripts/tf/resolved-sources.sh
+            /intake/sis_intake/**
+            !/intake/sis_intake/__init__.py
+            /intake/schema/**
+            /intake/rules/compat.json
+            /intake/rules/defaults.json
+            /intake/rules/rules.json
+
+      - name: Print the OIDC claims and compare the SHAs
+        env:
+          JOB_WORKFLOW_SHA: ${{ job.workflow_sha }}
+          LOCK_WORKFLOW_SHA: ${{ needs.resolve.outputs.workflow_sha }}
+        run: |
+          "$GITHUB_WORKSPACE/.platform/scripts/aws/print-oidc-claims.sh" \
+            job_workflow_ref job_workflow_sha sub ref repository_id
+
+      # Runs after a claims failure too: the owner sends both lines (checkpoint step 4). Never prints the value.
+      - name: AWS_ACCOUNT_ID reached the job (F29)
+        if: ${{ !cancelled() }}
+        env:
+          ACCOUNT: ${{ secrets.AWS_ACCOUNT_ID }}
+        run: |
+          if [ -n "$ACCOUNT" ]; then
+            echo "AWS_ACCOUNT_ID: pass (non-empty)"
+          else
+            echo "::error::AWS_ACCOUNT_ID: fail (empty: no environment secret, or the caller did not pass it by name)"
+            exit 1
+          fi
+
+  negative:
+    name: negative (step 7, STS must deny)
+    needs: resolve
+    if: inputs.check == 'negative'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    environment: ${{ inputs.env }}
+    permissions:
+      contents: read
+      id-token: write # the OIDC token the apply and deploy roles must refuse (assume-role calls, unsigned)
+    concurrency:
+      group: oidc-smoke-${{ inputs.env }}
+      cancel-in-progress: false
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
+        with:
+          egress-policy: block
+          disable-telemetry: true
+          disable-sudo-and-containers: true
+          allowed-endpoints: >
+            github.com:443
+            sts.${{ needs.resolve.outputs.region }}.amazonaws.com:443
+
+      - name: Require the AWS_ACCOUNT_ID secret (O13)
+        env:
+          ACCOUNT: ${{ secrets.AWS_ACCOUNT_ID }}
+        run: |
+          if [ -z "$ACCOUNT" ]; then
+            echo "::error::AWS_ACCOUNT_ID is empty: the caller must pass secrets.AWS_ACCOUNT_ID by name (O13)"
+            exit 1
+          fi
+
+      - name: Check out sis-platform at workflow_sha (closure only)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: trungleviet-agilityio/sis-platform
+          ref: ${{ job.workflow_sha }}
+          path: .platform
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /scripts/release/closure.txt
+            /.github/workflows/reusable-*.yml
+            /scripts/platform/**
+            /scripts/aws/**
+            /scripts/lib.sh
+            /scripts/tf/policy.py
+            /scripts/tf/resolved-sources.sh
+            /intake/sis_intake/**
+            !/intake/sis_intake/__init__.py
+            /intake/schema/**
+            /intake/rules/compat.json
+            /intake/rules/defaults.json
+            /intake/rules/rules.json
+
+      - name: Apply and deploy roles refuse this file's token
+        env:
+          ACCOUNT: ${{ secrets.AWS_ACCOUNT_ID }}
+          REGION: ${{ needs.resolve.outputs.region }}
+          APPLY_ROLE: ${{ needs.resolve.outputs.apply_role }}
+          DEPLOY_ROLE: ${{ needs.resolve.outputs.deploy_role }}
+        run: '"$GITHUB_WORKSPACE/.platform/scripts/aws/assume-role-must-be-denied.sh" "$APPLY_ROLE" "$DEPLOY_ROLE"'

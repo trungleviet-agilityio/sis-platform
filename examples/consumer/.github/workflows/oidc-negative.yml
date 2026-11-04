@@ -1,0 +1,33 @@
+# OIDC negative test, checkpoint step 7 (ADR 0002 O12): run after the bootstrap with
+# `gh workflow run oidc-negative.yml --ref main -f env=dev` and approve the dev deployment. It calls STS on purpose
+# (unsigned AssumeRoleWithWebIdentity) and passes only when the apply and deploy roles answer AccessDenied: the smoke
+# workflow file is not in their trust. Expect a security alert from the bootstrap rule for each denied call.
+name: OIDC negative
+
+on:
+  workflow_dispatch:
+    inputs:
+      env:
+        description: Env whose apply and deploy roles must refuse the smoke workflow's token
+        type: choice
+        options: [dev, prod]
+        required: true
+        default: dev
+
+permissions: {}
+
+jobs:
+  negative:
+    name: oidc negative
+    permissions:
+      contents: read # the reusable jobs check out this repository
+      id-token: write # the token the apply and deploy roles must refuse
+    concurrency:
+      group: caller-oidc-negative-${{ inputs.env }}
+      cancel-in-progress: false
+    uses: trungleviet-agilityio/sis-platform/.github/workflows/reusable-oidc-smoke.yml@fedcba9876543210fedcba9876543210fedcba98 # v0.2.0
+    with:
+      env: ${{ inputs.env }}
+      check: negative
+    secrets:
+      AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
