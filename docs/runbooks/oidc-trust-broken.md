@@ -15,9 +15,9 @@ unexpectedly passes. No secret values and no account IDs belong in this file or 
 
 ## 2. Collect the claims (non-secret, no token)
 
-1. Run the smoke workflow's claims step (`reusable-oidc-smoke.yml` from the canary repo, `main`, `environment: dev`).
+1. Owner: run the smoke workflow's claims step (`reusable-oidc-smoke.yml` from the canary repo, `main`, `environment: dev`).
 2. Record `job_workflow_ref`, `job_workflow_sha`, `sub`, `ref`, `repository_id`.
-3. Compare with the role trust: `aws iam get-role --role-name <prefix>-<env>-gha-<plan|apply|deploy>` and read
+3. Owner, with Identity Center credentials: compare with the role trust, `aws iam get-role --role-name <prefix>-<env>-gha-<plan|apply|deploy>` and read
    `AssumeRolePolicyDocument`. Check `aud` = `sts.amazonaws.com`, the `sub`, and the `job_workflow_ref` value
    `trungleviet-agilityio/sis-platform/.github/workflows/<file>@<sha>`.
 

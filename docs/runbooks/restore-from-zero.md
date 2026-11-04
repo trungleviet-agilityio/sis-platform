@@ -34,9 +34,13 @@ secret values go in this file: use labels.
 
 ## 3. Restore state from a bucket version
 
-1. List object versions of `envs/<env>/terraform.tfstate` (and `bootstrap/terraform.tfstate`) and pick the last
-   good one by time.
-2. Copy that version back as the current object. Do not delete versions.
+Owner, with Identity Center credentials for the account:
+
+1. List the versions and pick the last good one by time:
+   `aws s3api list-object-versions --bucket <bucket> --prefix envs/<env>/terraform.tfstate --query 'Versions[].[VersionId,LastModified,IsLatest]' --output table`
+   (use the prefix `bootstrap/terraform.tfstate` for the bootstrap state).
+2. Copy that version back as the current object; do not delete versions:
+   `aws s3api copy-object --bucket <bucket> --key envs/<env>/terraform.tfstate --copy-source "<bucket>/envs/<env>/terraform.tfstate?versionId=<version-id>"`
 3. Run `terraform plan`. Expect no changes; if there are changes, read them and stop for the owner.
 
 ## 4. Rebuild the bootstrap
