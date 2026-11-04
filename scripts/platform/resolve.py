@@ -3,7 +3,7 @@
 
 Usage:
   resolve.py --caller DIR --trust-only
-  resolve.py --caller DIR --env ENV [--tfvars FILE]
+  resolve.py --caller DIR --env ENV [--tfvars FILE] [--families F1,F2]
 
 DIR is the caller's checkout (it holds platform.lock and platform.yaml). The job context comes
 from the environment, set by the workflow from `job.*` (F17): JOB_WORKFLOW_REPOSITORY,
@@ -14,6 +14,8 @@ JOB_WORKFLOW_FILE_PATH and JOB_WORKFLOW_SHA. Checks, in order:
   M8   the manifest is valid under `--context lint` (the validator at the same SHA)
   M6   ENV is an env of the plan; family, region, prefix and role names have their documented
        shape, and the role names are <prefix>-<env>-gha-{plan,apply,deploy}
+  W2   with --families, the runtime family is one the calling workflow has a job for; otherwise
+       every family job would be skipped and the run would end green with nothing done
 With --tfvars it writes the M7 `--emit tfvars --env ENV` output to FILE, mode 0600 (keep FILE
 under $RUNNER_TEMP: it never lands in the repo). Prints `key=value` lines for $GITHUB_OUTPUT:
 release_sha and workflow_sha (from the lock), job_workflow_sha (the job context) and, with --env,
@@ -158,24 +160,32 @@ def main(argv: List[str], environ: Dict[str, str]) -> int:
     caller: Optional[str] = None
     env: Optional[str] = None
     tfvars: Optional[str] = None
+    families: Optional[List[str]] = None
     trust_only = False
     args = list(argv)
     while args:
         arg = args.pop(0)
         if arg == "--trust-only":
             trust_only = True
-        elif arg in ("--caller", "--env", "--tfvars") and args:
+        elif arg in ("--caller", "--env", "--tfvars", "--families") and args:
             value = args.pop(0)
             if arg == "--caller":
                 caller = value
             elif arg == "--env":
                 env = value
+            elif arg == "--families":
+                families = value.split(",")
             else:
                 tfvars = value
         else:
             print(__doc__, file=sys.stderr)
             return 2
-    if caller is None or trust_only == (env is not None) or (trust_only and tfvars is not None):
+    if (
+        caller is None
+        or trust_only == (env is not None)
+        or (trust_only and (tfvars is not None or families is not None))
+        or (families is not None and not all(FAMILY_RE.fullmatch(f) for f in families))
+    ):
         print(__doc__, file=sys.stderr)
         return 2
     if env is not None and not ENV_RE.fullmatch(env):
@@ -206,6 +216,14 @@ def main(argv: List[str], environ: Dict[str, str]) -> int:
                 print(problem, file=sys.stderr)
             return 1
         outputs.update(resolved)
+        if families is not None and resolved["family"] not in families:
+            print(
+                f"runtime family '{resolved['family']}' has no job in this workflow "
+                f"(supported: {', '.join(families)}); refusing instead of a green run with "
+                "nothing planned or applied (W2)",
+                file=sys.stderr,
+            )
+            return 1
     for key, value in outputs.items():
         print(f"{key}={value}")
     return 0

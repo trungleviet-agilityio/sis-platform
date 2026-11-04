@@ -2,6 +2,8 @@
 # `gh workflow run oidc-negative.yml --ref main -f env=dev` and approve the dev deployment. It calls STS on purpose
 # (unsigned AssumeRoleWithWebIdentity) and passes only when the apply and deploy roles answer AccessDenied: the smoke
 # workflow file is not in their trust. Expect a security alert from the bootstrap rule for each denied call.
+# STS also answers AccessDenied for a missing role or a wrong account: a pass means a refused trust only after the
+# same apply role ARN was assumed successfully (step 8, the dev apply).
 name: OIDC negative
 
 on:

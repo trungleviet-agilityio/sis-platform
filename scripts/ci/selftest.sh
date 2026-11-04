@@ -232,6 +232,30 @@ out="$(trap - ERR; "$py" -I "$sparse" --closure "$tmp/closure-magic.txt" "$fx/re
   die "selftest: check_sparse.py should refuse other pathspec magic"
 case "$out" in *"is not :(glob) or :(exclude,glob)"*) ;; *) die "selftest: check_sparse.py magic message. Got: $out" ;; esac
 
+log "reusable workflows: bash with pipefail, and SUPPORTED_FAMILIES equal to the family gates (W2)"
+if [ ${#reusables[@]} -gt 0 ]; then
+  "$py" -I - "${reusables[@]}" <<'PY' || die "selftest: a reusable workflow lacks the shell default or its family list drifted"
+import re
+import sys
+
+import yaml
+
+bad = []
+for path in sys.argv[1:]:
+    doc = yaml.safe_load(open(path, encoding="utf-8"))
+    if ((doc.get("defaults") or {}).get("run") or {}).get("shell") != "bash":
+        bad.append(f"{path}: defaults.run.shell must be bash (pipefail)")
+    text = open(path, encoding="utf-8").read()
+    gates = set(re.findall(r"needs\.resolve\.outputs\.family == '([a-z0-9-]+)'", text))
+    listed = re.findall(r"SUPPORTED_FAMILIES: ([a-z0-9,-]+)", text)
+    if gates and (not listed or any(set(v.split(",")) != gates for v in listed)):
+        bad.append(f"{path}: SUPPORTED_FAMILIES {listed} differs from the family gates {sorted(gates)}")
+for line in bad:
+    print(line, file=sys.stderr)
+sys.exit(1 if bad else 0)
+PY
+fi
+
 log "scripts the reusable workflows run"
 "$ROOT/scripts/ci/platform-selftest.sh"
 

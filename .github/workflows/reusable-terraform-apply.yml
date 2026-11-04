@@ -6,7 +6,9 @@
 # for each <sha> in the caller's trusted_workflow_shas (O9). Renaming or moving this file is a major bump.
 # Jobs:
 #   resolve       no credentials. Refuses any event but push and workflow_dispatch (AA3: AWS has no event_name
-#                 condition key), checks the job context and platform.lock (O11), runs the validator (`lint`, M8).
+#                 condition key) and any ref but main (O1); apply-lambda repeats both before the credential.
+#                 Checks the job context and platform.lock (O11), runs the validator (`lint`, M8), and fails
+#                 when the runtime family has no job here (SUPPORTED_FAMILIES, W2).
 #   apply-lambda  the lambda family (W2). `environment: <env>` (the gate and the environment secret, F29), the apply
 #                 role, `concurrency: tf-<env>` without cancel (W4, H10). Plan, policy lint (T11), apply of that
 #                 saved plan, account-free summary; the plan files are deleted.
@@ -27,6 +29,11 @@ on:
         required: true
 
 permissions: {}
+
+# bash -eo pipefail for every run step: a failing command in a pipe fails the step.
+defaults:
+  run:
+    shell: bash
 
 env:
   TF_IN_AUTOMATION: "1"
@@ -51,14 +58,19 @@ jobs:
           allowed-endpoints: >
             github.com:443
 
-      - name: Refuse any event but push and workflow_dispatch (AA3)
+      - name: Refuse any event but push and workflow_dispatch, and any ref but main (AA3, O1)
         env:
           EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
         run: |
           case "$EVENT" in
             push | workflow_dispatch) ;;
             *) echo "::error::apply runs only on push or workflow_dispatch, not on ${EVENT} (AA3)"; exit 1 ;;
           esac
+          if [ "$REF" != "refs/heads/main" ]; then
+            echo "::error::apply runs only from refs/heads/main, not from ${REF} (O1)"
+            exit 1
+          fi
 
       - name: Assert the job runs a sis-platform reusable workflow (O11)
         env:
@@ -110,9 +122,11 @@ jobs:
           JOB_WORKFLOW_FILE_PATH: ${{ job.workflow_file_path }}
           JOB_WORKFLOW_SHA: ${{ job.workflow_sha }}
           ENV_NAME: ${{ inputs.env }}
+          # The families this workflow has a job for; keep equal to the `if:` gates of the family jobs (W2).
+          SUPPORTED_FAMILIES: lambda
         run: |
           python3 -I "$GITHUB_WORKSPACE/.platform/scripts/platform/resolve.py" --caller caller --env "$ENV_NAME" \
-            --tfvars "$RUNNER_TEMP/platform.tfvars.json" >> "$GITHUB_OUTPUT"
+            --tfvars "$RUNNER_TEMP/platform.tfvars.json" --families "$SUPPORTED_FAMILIES" >> "$GITHUB_OUTPUT"
 
   apply-lambda:
     name: apply (lambda)
@@ -150,14 +164,19 @@ jobs:
             secretsmanager.${{ needs.resolve.outputs.region }}.amazonaws.com:443
             iam.amazonaws.com:443
 
-      - name: Refuse any event but push and workflow_dispatch (AA3)
+      - name: Refuse any event but push and workflow_dispatch, and any ref but main (AA3, O1)
         env:
           EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
         run: |
           case "$EVENT" in
             push | workflow_dispatch) ;;
             *) echo "::error::apply runs only on push or workflow_dispatch, not on ${EVENT} (AA3)"; exit 1 ;;
           esac
+          if [ "$REF" != "refs/heads/main" ]; then
+            echo "::error::apply runs only from refs/heads/main, not from ${REF} (O1)"
+            exit 1
+          fi
 
       - name: Require the AWS_ACCOUNT_ID secret (O13)
         env:

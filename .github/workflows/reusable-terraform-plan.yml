@@ -6,6 +6,8 @@
 # Jobs:
 #   resolve      no credentials. Checks the job context and the caller's platform.lock (O11), runs the validator at
 #                the same SHA (`lint`, M8) and outputs `family` and `region` for the gate and the egress list.
+#                It fails when the family has no job here (SUPPORTED_FAMILIES, W2), so an unsupported runtime
+#                never ends green with nothing planned.
 #   plan-lambda  the lambda family (Phase 1 ships only this one, W2). Plan role, policy lint over
 #                `terraform show -json` (T11), account-free summary, plan file deleted. No `environment:` (it would
 #                change the OIDC subject the plan role trusts). Other families get their own job with their hosts.
@@ -30,6 +32,11 @@ on:
         required: true
 
 permissions: {}
+
+# bash -eo pipefail for every run step: a failing command in a pipe fails the step.
+defaults:
+  run:
+    shell: bash
 
 env:
   TF_IN_AUTOMATION: "1"
@@ -59,6 +66,15 @@ jobs:
           egress-policy: audit
           allowed-endpoints: >
             github.com:443
+
+      - name: Refuse any event but pull_request, push, workflow_dispatch and schedule
+        env:
+          EVENT: ${{ github.event_name }}
+        run: |
+          case "$EVENT" in
+            pull_request | push | workflow_dispatch | schedule) ;;
+            *) echo "::error::plan runs only on pull_request, push, workflow_dispatch or schedule, not on ${EVENT}"; exit 1 ;;
+          esac
 
       - name: Assert the job runs a sis-platform reusable workflow (O11)
         env:
@@ -111,9 +127,11 @@ jobs:
           JOB_WORKFLOW_FILE_PATH: ${{ job.workflow_file_path }}
           JOB_WORKFLOW_SHA: ${{ job.workflow_sha }}
           ENV_NAME: ${{ inputs.env }}
+          # The families this workflow has a job for; keep equal to the `if:` gates of the family jobs (W2).
+          SUPPORTED_FAMILIES: lambda
         run: |
           python3 -I "$GITHUB_WORKSPACE/.platform/scripts/platform/resolve.py" --caller caller --env "$ENV_NAME" \
-            --tfvars "$RUNNER_TEMP/platform.tfvars.json" >> "$GITHUB_OUTPUT"
+            --tfvars "$RUNNER_TEMP/platform.tfvars.json" --families "$SUPPORTED_FAMILIES" >> "$GITHUB_OUTPUT"
 
   plan-lambda:
     name: plan (lambda)

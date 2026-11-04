@@ -10,6 +10,9 @@
 #   negative  checkpoint step 7, after the bootstrap. It DOES call STS (unsigned AssumeRoleWithWebIdentity, nothing
 #             else) and requires an explicit AccessDenied from the env's apply and deploy roles: this file is not in
 #             their job_workflow_ref trust (O9). Runs only when the caller passes `check: negative`.
+#             STS also answers AccessDenied for a missing role or a wrong account, so a pass proves the trust
+#             refusal only after the same apply role ARN was assumed successfully (step 8, the dev apply). For
+#             the deploy role no positive proof exists in Phase 1 (it is inert by design, L3 c).
 # The family gate of W2 does not apply here (the guard exempts this file): the claims do not depend on the runtime.
 name: OIDC smoke (reusable)
 
@@ -31,6 +34,11 @@ on:
         required: true
 
 permissions: {}
+
+# bash -eo pipefail for every run step: a failing command in a pipe fails the step.
+defaults:
+  run:
+    shell: bash
 
 jobs:
   resolve:

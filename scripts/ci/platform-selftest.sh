@@ -71,6 +71,12 @@ expect_fail "a 12-digit run in an address" "plan summary contains a 12-digit num
   bash -c '"$1" --title t <"$2"' _ "$summary" "$fx/plan-account.json"
 expect_fail "not a plan" "is not the JSON of terraform show -json" bash -c 'echo "{}" | "$1" --title t' _ "$summary"
 expect_fail "no title" "usage:" bash -c '"$1" <"$2"' _ "$summary" "$fx/plan-empty.json"
+# The reusable workflows set `defaults.run.shell: bash` (bash --noprofile --norc -eo pipefail): a failing summary in
+# the apply job's pipe into assert-no-account-id.sh must fail the step, as it does here.
+expect_fail "a failing summary inside the apply step's pipe" "plan summary contains a 12-digit number" \
+  bash --noprofile --norc -eo pipefail -c '"$1" --title t <"$3" | "$2" >>/dev/null; echo step-continued' \
+  _ "$summary" "$assert" "$fx/plan-account.json"
+grep -qF "step-continued" "$tmp/out" && die "platform selftest: the pipe did not stop the step"
 
 log "plan-policy.py"
 policy="$ROOT/scripts/platform/plan-policy.py"
@@ -99,7 +105,8 @@ ctx() { # <repository> <file path> <sha> <resolve args...>
 good_repo="trungleviet-agilityio/sis-platform"
 good_file=".github/workflows/reusable-terraform-plan.yml"
 expect_ok "a trusted SHA and a valid manifest" "plan_role=exa-dev-gha-plan" \
-  ctx "$good_repo" "$good_file" "$sha_a" --caller "$caller" --env dev --tfvars "$tmp/platform.tfvars.json"
+  ctx "$good_repo" "$good_file" "$sha_a" --caller "$caller" --env dev --tfvars "$tmp/platform.tfvars.json" \
+  --families lambda
 for want in "family=lambda" "region=ap-southeast-1" "prefix=exa" "apply_role=exa-dev-gha-apply" \
   "deploy_role=exa-dev-gha-deploy" "release_sha=$sha_a" "workflow_sha=$sha_b" "job_workflow_sha=$sha_a" "env=dev"; do
   grep -qxF "$want" "$tmp/out" || die "platform selftest: resolve.py output lacks the line '$want'"
@@ -122,6 +129,21 @@ expect_fail "an env outside the manifest" "env 'qa' is not an env of platform.ya
 expect_fail "an env name with a newline" "must match" \
   ctx "$good_repo" "$good_file" "$sha_a" --caller "$caller" --env "$(printf 'dev\nfamily=x')"
 expect_fail "no mode" "Usage:" ctx "$good_repo" "$good_file" "$sha_a" --caller "$caller"
+expect_fail "families with trust only" "Usage:" \
+  ctx "$good_repo" "$good_file" "$sha_a" --caller "$caller" --trust-only --families lambda
+expect_fail "a malformed family list" "Usage:" \
+  ctx "$good_repo" "$good_file" "$sha_a" --caller "$caller" --env dev --families 'lambda,Bad;x'
+# W2: a valid manifest of a family with no job in the workflow (the ecs example) must fail, not skip to green.
+ecs_caller="$tmp/ecs-caller"
+mkdir -p "$ecs_caller"
+cp "$ROOT/intake/examples/valid/ship-it-safely.yaml" "$ecs_caller/platform.yaml"
+cp "$caller/platform.lock" "$ecs_caller/platform.lock"
+expect_ok "an ecs manifest without a family list" "family=ecs" \
+  ctx "$good_repo" "$good_file" "$sha_a" --caller "$ecs_caller" --env dev
+expect_fail "an ecs manifest in a lambda-only workflow" \
+  "runtime family 'ecs' has no job in this workflow (supported: lambda)" \
+  ctx "$good_repo" "$good_file" "$sha_a" --caller "$ecs_caller" --env dev --families lambda
+grep -q "^family=" "$tmp/out" && die "platform selftest: resolve.py printed outputs for an unsupported family"
 sed 's/^  prod:$/  prod-x:/' "$caller/platform.yaml" >"$tmp/bad.yaml"
 cp "$tmp/bad.yaml" "$caller/platform.yaml"
 expect_fail "an invalid manifest" "platform.yaml is not valid under --context lint (M8)" \

@@ -4,7 +4,10 @@
 # job of reusable-oidc-smoke.yml, never in the 4a claims run. The job's token comes from the smoke workflow file,
 # which no apply or deploy role trusts (O9), while sub, ref and repository_id match. Each named role must answer
 # with an explicit AccessDenied to an unsigned AssumeRoleWithWebIdentity call. A success means the trust is too
-# broad; any other error (network, a wrong ARN, throttling) fails too, because it proves nothing about the trust.
+# broad; any other error (network, throttling, a malformed request) fails too, because it proves nothing.
+# Limit, accepted: STS also answers AccessDenied when the role does not exist or the ARN names another account, so
+# a pass here cannot tell a refused trust from a wrong ARN. This test is meaningful only once the same ARN has been
+# proven by a successful assume of that role (checkpoint step 8, the dev apply); the step order is the owner's.
 # Prints the token's sub and job_workflow_ref, never the token or the account; AWS error text is redacted.
 #
 # Usage: ACCOUNT=... REGION=... scripts/aws/assume-role-must-be-denied.sh <role name>...
