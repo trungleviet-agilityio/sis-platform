@@ -1,0 +1,3 @@
+# A module is not a root: no provider lock is committed, and init output stays local.
+.terraform/
+.terraform.lock.hcl

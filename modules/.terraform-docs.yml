@@ -1,0 +1,23 @@
+# terraform-docs config for every module README under modules/ (ADR 0002, H9).
+# Generate: terraform-docs --config modules/.terraform-docs.yml modules/<name>
+# Check:    add --output-check (make tf-check does).
+formatter: "markdown table"
+
+output:
+  file: README.md
+  mode: inject
+  template: |-
+    <!-- BEGIN_TF_DOCS -->
+    {{ .Content }}
+    <!-- END_TF_DOCS -->
+
+sort:
+  enabled: true
+  by: name
+
+settings:
+  anchor: false
+  html: false
+  escape: true
+  # The provider lock file is not committed for a module, so the docs must not depend on it.
+  lockfile: false
