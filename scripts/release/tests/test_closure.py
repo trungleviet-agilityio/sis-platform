@@ -40,6 +40,30 @@ class ClosureComputation(unittest.TestCase):
     def test_indented_comment_lines_are_comments(self) -> None:
         self.assertEqual(closure.parse_specs("  # c\n\t# d\n:(glob)a\n"), [":(glob)a"])
 
+    def test_only_glob_and_exclude_glob_pathspecs_are_accepted(self) -> None:
+        for bad in (
+            ":(top)a",
+            ":!a",
+            ":/a",
+            "scripts/a",
+            ":(glob,top)a",
+            ":(exclude)a",
+            ":(icase,glob)a",
+        ):
+            with self.assertRaises(closure.ClosureError, msg=bad) as ctx:
+                closure.parse_specs(f"# c\n:(glob)ok\n{bad}\n")
+            self.assertIn("is not a :(glob) or :(exclude,glob) pathspec", str(ctx.exception))
+        self.assertEqual(
+            closure.parse_specs(":(glob)a/**\n:(exclude,glob)a/b.py\n"),
+            [":(glob)a/**", ":(exclude,glob)a/b.py"],
+        )
+
+    def test_a_bad_pathspec_in_a_committed_closure_is_an_error(self) -> None:
+        self.repo.write("scripts/release/closure.txt", helpers.CLOSURE + ":(top)x\n")
+        self.repo.commit("bad spec")
+        with self.assertRaises(closure.ClosureError):
+            closure.specs_at(str(self.repo.path), "HEAD")
+
     def test_history_with_a_merge_commit_is_refused(self) -> None:
         self.repo.checkout_new("side")
         self.repo.write("docs/side.md", "side\n")

@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """The workflow closure (ADR 0002, L2): the files whose change moves `workflow_sha`.
 
-`scripts/release/closure.txt` lists `:(glob)` git pathspecs, one per line (`#` starts a comment).
+`scripts/release/closure.txt` lists git pathspecs, one per line (`#` starts a comment). Each is
+`:(glob)<path>` or `:(exclude,glob)<path>`; any other pathspec magic is refused.
 
     workflow_sha = git log -1 --format=%H <release_sha> -- <closure pathspecs>
 
@@ -18,6 +19,9 @@ import sys
 from typing import List, Optional, Set
 
 CLOSURE_PATH = "scripts/release/closure.txt"
+SPEC_PREFIXES = (":(glob)", ":(exclude,glob)")
+# A git call that hangs (a stuck network clone, a lock) must not hang a release or a CI job.
+GIT_TIMEOUT = 120
 
 
 class ClosureError(Exception):
@@ -26,7 +30,10 @@ class ClosureError(Exception):
 
 def git(repo: str, *args: str) -> str:
     cmd = ["git", "-C", repo, *args]
-    done = subprocess.run(cmd, capture_output=True, check=False)  # noqa: S603
+    try:
+        done = subprocess.run(cmd, capture_output=True, check=False, timeout=GIT_TIMEOUT)  # noqa: S603
+    except subprocess.TimeoutExpired as exc:
+        raise ClosureError(f"git {args[0]} timed out after {GIT_TIMEOUT} seconds") from exc
     if done.returncode != 0:
         detail = done.stderr.decode(errors="replace").strip()
         raise ClosureError(f"git {args[0]} failed: {detail}")
@@ -36,21 +43,34 @@ def git(repo: str, *args: str) -> str:
 def git_ok(repo: str, *args: str) -> bool:
     """True when `git <args>` exits 0 (for yes/no questions such as merge-base --is-ancestor)."""
     cmd = ["git", "-C", repo, *args]
-    return subprocess.run(cmd, capture_output=True, check=False).returncode == 0  # noqa: S603
+    try:
+        done = subprocess.run(cmd, capture_output=True, check=False, timeout=GIT_TIMEOUT)  # noqa: S603
+    except subprocess.TimeoutExpired:
+        return False
+    return done.returncode == 0
 
 
 def parse_specs(text: str) -> List[str]:
-    return [
+    specs = [
         line.strip()
         for line in text.splitlines()
         if line.strip() and not line.strip().startswith("#")
     ]
+    for spec in specs:
+        if not spec.startswith(SPEC_PREFIXES):
+            raise ClosureError(
+                f"{CLOSURE_PATH}: '{spec}' is not a :(glob) or :(exclude,glob) pathspec"
+            )
+    return specs
 
 
 def specs_at(repo: str, ref: str) -> Optional[List[str]]:
     """The closure pathspecs as committed at `ref`, or None when that commit has no closure.txt."""
     cmd = ["git", "-C", repo, "show", f"{ref}:{CLOSURE_PATH}"]
-    done = subprocess.run(cmd, capture_output=True, check=False)  # noqa: S603
+    try:
+        done = subprocess.run(cmd, capture_output=True, check=False, timeout=GIT_TIMEOUT)  # noqa: S603
+    except subprocess.TimeoutExpired:
+        return None
     if done.returncode != 0:
         return None
     return parse_specs(done.stdout.decode(errors="replace"))

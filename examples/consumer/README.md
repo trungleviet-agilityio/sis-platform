@@ -19,14 +19,17 @@ No account ID, email or state bucket name is committed. They live in `accounts/<
 
 ```sh
 # Offline P9 check: lock schema, platform.yaml version, workflow and module pins, plugin pin.
-python3 scripts/platform/check_lock.py examples/consumer
+# --platform-checkout is only for this example, which lives inside the sis-platform checkout and
+# calls ../../../../modules/... by path: local sources may leave examples/consumer but not the checkout.
+# A real consumer repository runs it without the flag, and then no local source may leave the repo.
+python3 scripts/platform/check_lock.py examples/consumer --platform-checkout
 
 # Also against a clone of sis-platform: tag, ancestry, closure and the trusted SHAs (needs network).
 python3 scripts/platform/check_lock.py examples/consumer --remote
 ```
 
 The module-source rule is a text and JSON scan of `*.tf`, `*.tf.json`, `*.tofu` and `*.tofu.json`. It is not the
-last line of defense: the reusable workflows (sub-PR 1f-2) also run `scripts/tf/resolved-sources.sh` over
+last line of defense: the reusable workflows (sub-PR 1f-2) also run `scripts/tf/resolved-sources.sh <dir> <data dir> <release_sha from platform.lock>` over
 `.terraform/modules/modules.json` after `terraform init`, which fails closed on what Terraform actually resolved.
 
 `--remote` fails on this example by design: its SHAs are placeholders, not a real release.

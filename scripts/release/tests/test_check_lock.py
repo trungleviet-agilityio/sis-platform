@@ -6,20 +6,24 @@ Python 3.9 or later. Every case builds local fixture git repos; nothing touches 
 
 from __future__ import annotations
 
+import base64
 import json
+import os
 import shutil
 import subprocess  # noqa: S404  (one end-to-end exit-code check)
 import sys
 import tempfile
 import unittest
 from pathlib import Path
-from typing import List, Optional
+from typing import Any, List, Optional
+from unittest import mock
 
 import helpers
 from helpers import PLATFORM, REPO_ROOT, Repo, consumer, run_main
 
 # isort: split
 import check_lock  # noqa: E402  (sys.path is set by helpers)
+import closure  # noqa: E402
 
 A = "a" * 40
 B = "b" * 40
@@ -409,6 +413,184 @@ class LowFindings(OfflineCase):
         self.expect_ok()
 
 
+BAD = "1" * 40
+BAD_URL = f"git::https://github.com/{PLATFORM}.git//modules/account-bootstrap?ref={BAD}"
+NOT_PLAIN = "module source is not a single plain string literal"
+
+
+class ModuleForms(OfflineCase):
+    """A `source` that is not one plain string literal cannot be judged by a text scan (round 3)."""
+
+    def add(self, name: str, text: str) -> None:
+        (self.root / "infra" / "bootstrap" / name).write_text(text, encoding="utf-8")
+
+    def test_parenthesised(self) -> None:
+        self.add("x.tf", f'module "x" {{\n  source = ("{BAD_URL}")\n}}\n')
+        self.expect_fail(NOT_PLAIN)
+
+    def test_conditional(self) -> None:
+        self.add("x.tf", 'module "x" {\n  source = true ? "./a" : "./b"\n}\n')
+        self.expect_fail(NOT_PLAIN)
+
+    def test_interpolated(self) -> None:
+        self.add("x.tf", 'module "x" {\n  source = "./local${"/../"}"\n}\n')
+        self.expect_fail(NOT_PLAIN)
+
+    def test_template_directive(self) -> None:
+        self.add("x.tf", 'module "x" {\n  source = "./local%{ if true }a%{ endif }"\n}\n')
+        self.expect_fail(NOT_PLAIN)
+
+    def test_escaped_quote(self) -> None:
+        self.add("x.tf", 'module "x" {\n  source = "\\"x" source = "./local"\n}\n')
+        self.expect_fail(NOT_PLAIN)
+
+    def test_heredoc(self) -> None:
+        self.add("x.tf", f'module "x" {{\n  source = <<EOT\n{BAD_URL}\nEOT\n}}\n')
+        self.expect_fail(NOT_PLAIN)
+
+    def test_a_reference(self) -> None:
+        self.add("x.tf", 'module "x" {\n  source = var.where\n}\n')
+        self.expect_fail(NOT_PLAIN)
+
+    def test_a_source_key_inside_a_nested_object_is_not_the_module_source(self) -> None:
+        self.add(
+            "x.tf",
+            'module "x" {\n  source = "./ok"\n  providers = {\n    source = var.p\n  }\n}\n',
+        )
+        self.expect_ok()
+
+    def test_plain_literals_still_pass(self) -> None:
+        self.add(
+            "x.tf", 'module "x" { source = "./ok" }\nmodule "y" {\n  source = "../ok"  # c\n}\n'
+        )
+        self.expect_ok()
+
+
+class LocalSources(OfflineCase):
+    def add(self, source: str) -> None:
+        path = self.root / "infra" / "bootstrap" / "x.tf"
+        path.write_text(f'module "x" {{\n  source = "{source}"\n}}\n', encoding="utf-8")
+
+    def test_terraform_cache_segment(self) -> None:
+        self.add("./.terraform/modules/m")
+        self.expect_fail(
+            "local module source './.terraform/modules/m' goes through a .terraform or .git"
+        )
+
+    def test_git_segment(self) -> None:
+        self.add("../.git/x")
+        self.expect_fail("local module source '../.git/x' goes through a .terraform or .git")
+
+    def test_dotted_segment_via_parent_hops(self) -> None:
+        self.add("./a/../.terraform/m")
+        self.expect_fail("goes through a .terraform or .git")
+
+    def test_leaving_the_repository_root(self) -> None:
+        self.add("../../../elsewhere")
+        self.expect_fail("local module source '../../../elsewhere' leaves the repository root")
+
+    def test_staying_inside_is_fine(self) -> None:
+        self.add("../../local-module")
+        self.expect_ok()
+
+    def test_name_that_merely_starts_with_a_dot_is_fine(self) -> None:
+        self.add("./.terraformish/m")
+        self.expect_ok()
+
+
+class PlatformCheckout(unittest.TestCase):
+    """examples/consumer sits inside a sis-platform checkout and calls ../../../../modules/..."""
+
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.checkout = self.tmp / "plat"
+        (self.checkout / "scripts" / "release").mkdir(parents=True)
+        (self.checkout / "scripts" / "release" / "closure.txt").write_text(":(glob)x\n")
+        self.root = consumer(self.checkout / "examples" / "consumer", "v0.2.0", A, B)
+        self.main = self.root / "infra" / "bootstrap" / "main.tf"
+
+    def point(self, source: str) -> None:
+        text = self.main.read_text()
+        self.main.write_text(text.replace("../../local-module", source))
+
+    def run_check(self, *extra: str) -> tuple[int, str]:
+        rc, _out, err = run_main(check_lock, [str(self.root), *extra])
+        return rc, err
+
+    def test_without_the_flag_the_module_path_leaves_the_root(self) -> None:
+        self.point("../../../../modules/account-bootstrap")
+        rc, err = self.run_check()
+        self.assertEqual(rc, 1)
+        self.assertIn("leaves the repository root", err)
+
+    def test_with_the_flag_it_may_reach_the_checkout(self) -> None:
+        self.point("../../../../modules/account-bootstrap")
+        self.assertEqual(self.run_check("--platform-checkout"), (0, ""))
+
+    def test_with_the_flag_it_may_not_leave_the_checkout(self) -> None:
+        self.point("../../../../../escape")
+        rc, err = self.run_check("--platform-checkout")
+        self.assertEqual(rc, 1)
+        self.assertIn("leaves the sis-platform checkout", err)
+
+    def test_the_flag_needs_a_checkout(self) -> None:
+        (self.checkout / "scripts" / "release" / "closure.txt").unlink()
+        rc, err = self.run_check("--platform-checkout")
+        self.assertEqual(rc, 2)
+        self.assertIn("--platform-checkout: no sis-platform checkout above", err)
+
+
+class Symlinks(OfflineCase):
+    def test_symlink_to_a_directory(self) -> None:
+        (self.root / "vendor").mkdir()
+        os.symlink("../../vendor", self.root / "infra" / "bootstrap" / "vend")
+        self.expect_fail("symlink infra/bootstrap/vend points to a directory (not followed)")
+
+    def test_symlink_that_leaves_the_root(self) -> None:
+        outside = self.tmp / "outside.tf"
+        outside.write_text('module "y" {\n  source = "x/y/aws"\n}\n')
+        os.symlink(outside, self.root / "infra" / "bootstrap" / "o.tf")
+        self.expect_fail("symlink infra/bootstrap/o.tf leaves the repository root")
+
+    def test_directory_symlink_for_the_workflows_folder(self) -> None:
+        shutil.move(str(self.root / ".github" / "workflows"), str(self.root / "ci"))
+        os.symlink("../ci", self.root / ".github" / "workflows")
+        self.expect_fail("symlink .github/workflows points to a directory")
+
+    def test_symlink_to_a_file_inside_the_root_is_fine(self) -> None:
+        os.symlink("../../platform.yaml", self.root / "infra" / "bootstrap" / "p.yaml")
+        self.expect_ok()
+
+
+class YamlStrictness(OfflineCase):
+    def workflow(self, text: str) -> None:
+        (self.root / ".github" / "workflows" / "a.yml").write_text(text, encoding="utf-8")
+
+    def test_duplicate_keys_are_refused(self) -> None:
+        reusable = f"{PLATFORM}/.github/workflows/reusable-terraform-plan.yml"
+        self.workflow(
+            f"jobs:\n  a:\n    uses: {reusable}@{BAD} # v0.2.0\n    uses: {reusable}@{B} # v0.2.0\n"
+        )
+        self.expect_fail("a.yml: invalid YAML (duplicate key")
+
+    def test_binary_uses_is_refused(self) -> None:
+        blob = base64.b64encode(f"{PLATFORM}/x@{BAD}".encode()).decode()
+        self.workflow(f"jobs:\n  a:\n    uses: !!binary {blob}\n")
+        self.expect_fail("a.yml: uses value is not a plain string")
+
+    def test_platform_path_must_be_a_reusable_workflow(self) -> None:
+        for path in (".github/workflows/ci.yml", ".github/actions/y", "scripts/x.sh", ""):
+            tail = f"/{path}" if path else ""
+            self.workflow(f"jobs:\n  a:\n    uses: {PLATFORM}{tail}@{B} # v0.2.0\n")
+            self.expect_fail("is not a reusable-*.yml workflow of sis-platform (W1)")
+
+    def test_reusable_workflow_path_passes(self) -> None:
+        wf = f"{PLATFORM}/.github/workflows/reusable-oidc-smoke.yml"
+        self.workflow(f"jobs:\n  a:\n    uses: {wf}@{B} # v0.2.0\n")
+        self.expect_ok()
+
+
 class Settings(OfflineCase):
     def test_settings_missing(self) -> None:
         (self.root / ".claude" / "settings.json").unlink()
@@ -617,6 +799,56 @@ class RemoteChecks(RemoteCase):
             check_lock, [str(self.root), "--remote", "--platform-repo", str(plat.path)]
         )
         self.assertEqual((rc, err), (0, ""))
+
+
+class Subprocesses(RemoteCase):
+    def test_platform_repo_may_not_look_like_an_option(self) -> None:
+        rc, _out, err = run_main(check_lock, [str(self.root), "--remote", "--platform-repo", "-x"])
+        self.assertEqual(rc, 2)
+        self.assertIn("--platform-repo value must not start with '-'", err)
+
+    def test_clone_separates_the_source_with_double_dash(self) -> None:
+        seen: List[Any] = []
+        real = subprocess.run
+
+        def spy(cmd: List[str], *args: Any, **kwargs: Any) -> Any:
+            if "clone" in cmd:
+                seen.append((cmd, kwargs.get("timeout")))
+            return real(cmd, *args, **kwargs)
+
+        with mock.patch("subprocess.run", spy):
+            self.expect_remote_ok()
+        cmd, timeout = seen[0]
+        self.assertEqual(cmd[cmd.index("--") + 1], str(self.plat.path))
+        self.assertIsNotNone(timeout)
+
+    def test_every_git_call_has_a_timeout(self) -> None:
+        timeouts: List[Any] = []
+        real = subprocess.run
+
+        def spy(cmd: List[str], *args: Any, **kwargs: Any) -> Any:
+            timeouts.append(kwargs.get("timeout"))
+            return real(cmd, *args, **kwargs)
+
+        with mock.patch("subprocess.run", spy):
+            self.expect_remote_ok()
+        self.assertTrue(timeouts)
+        self.assertNotIn(None, timeouts)
+
+    def test_a_clone_timeout_is_reported(self) -> None:
+        boom = subprocess.TimeoutExpired("git", 1)
+        with mock.patch("subprocess.run", side_effect=boom):
+            self.expect_remote_fail("cannot clone")
+            self.assertIn("timed out", self.run_remote()[1])
+
+    def test_a_git_timeout_in_the_closure_helpers_is_an_error(self) -> None:
+        boom = subprocess.TimeoutExpired("git", 1)
+        with mock.patch("subprocess.run", side_effect=boom):
+            with self.assertRaises(closure.ClosureError) as ctx:
+                closure.git(str(self.plat.path), "status")
+            self.assertIn("timed out", str(ctx.exception))
+            self.assertIsNone(closure.specs_at(str(self.plat.path), "HEAD"))
+            self.assertFalse(closure.git_ok(str(self.plat.path), "status"))
 
 
 if __name__ == "__main__":

@@ -15,9 +15,9 @@ sha="0123456789abcdef0123456789abcdef01234567"
 platform="git::https://github.com/trungleviet-agilityio/sis-platform.git//modules/account-bootstrap?ref=$sha"
 failures=0
 
-# case <name> <expected: ok or a message fragment> <module source or ""> <provider>
+# case <name> <expected: ok or a message fragment> <module source or ""> <provider> [release_sha; default $sha, "-" for none]
 run_case() {
-  local name="$1" expect="$2" source="$3" provider="$4" dir out status
+  local name="$1" expect="$2" source="$3" provider="$4" release="${5:-$sha}" dir out status args
   dir="$tmp/$name"
   mkdir -p "$dir/data/modules"
   printf 'provider "%s" {\n  version = "6.71.0"\n}\n' "$provider" >"$dir/.terraform.lock.hcl"
@@ -25,7 +25,9 @@ run_case() {
     printf '{"Modules":[{"Key":"","Source":"","Dir":"."},{"Key":"m","Source":"%s","Dir":"x"}]}\n' "$source" >"$dir/data/modules/modules.json"
   fi
   status=0
-  out="$("$(dirname "$0")/resolved-sources.sh" "$dir" "$dir/data" 2>&1)" || status=$?
+  args=("$dir" "$dir/data")
+  [ "$release" = "-" ] || args+=("$release")
+  out="$("$(dirname "$0")/resolved-sources.sh" "${args[@]}" 2>&1)" || status=$?
   if [ "$expect" = ok ]; then
     if [ "$status" -ne 0 ]; then
       printf 'FAIL %s: expected pass, got: %s\n' "$name" "$out" >&2
@@ -47,6 +49,12 @@ run_case platform-at-branch "module source is not local or sis-platform at a com
 run_case platform-short-sha "module source is not local or sis-platform at a commit SHA" "git::https://github.com/trungleviet-agilityio/sis-platform.git//modules/account-bootstrap?ref=0123456" "$hc"
 run_case other-repo "module source is not local or sis-platform at a commit SHA" "git::https://github.com/someone/else.git//modules/account-bootstrap?ref=$sha" "$hc"
 run_case registry-module "module source is not local or sis-platform at a commit SHA" "terraform-aws-modules/vpc/aws" "$hc"
+run_case platform-at-other-sha "sis-platform module ref 1111111111111111111111111111111111111111 is not the release_sha $sha" "git::https://github.com/trungleviet-agilityio/sis-platform.git//modules/account-bootstrap?ref=1111111111111111111111111111111111111111" "$hc"
+run_case platform-without-release-sha "sis-platform module source needs the release_sha" "$platform" "$hc" -
+run_case release-sha-not-hex "release_sha must be 40 lowercase hex characters" "" "$hc" "not-a-sha"
+run_case local-terraform-cache "local module source goes through a .terraform or .git directory: ./.terraform/modules/m" "./.terraform/modules/m" "$hc"
+run_case local-git-dir "local module source goes through a .terraform or .git directory: ../.git/x" "../.git/x" "$hc"
+run_case local-dotted-name-is-fine ok "./.terraformish/m" "$hc"
 run_case third-party-provider "provider is not hashicorp: registry.terraform.io/acme/aws" "" "registry.terraform.io/acme/aws"
 
 # A missing lock file is a failure, not a pass.
