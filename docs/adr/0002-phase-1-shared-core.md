@@ -570,9 +570,9 @@ Stays (C) until the checkpoint, in addition to the list above: the size of the g
 6144-character limit, the `sha_pinning_required` field in the Actions permissions API, Administration read for
 rulesets, and the event refusal of AA3 in a live run.
 
-## Amendment B (2026-11-04, proposed): decisions from the wave 2 build and verify
+## Amendment B (2026-11-04, accepted): decisions from the wave 2 build and verify
 
-- Status: proposed (owner to accept with the wave 2 PRs)
+- Status: accepted (owner, 2026-11-04)
 - Source: peer reviews of 1h and 1f-1, and the wave 2 verify (e2e release simulation, security review).
 
 | # | Decision | Amends | Pillars |
@@ -642,3 +642,4 @@ list (step 8); the PyYAML wheel hash on `ubuntu-24.04`.
 | 2026-11-04 | Amendment B (proposed): decisions from the wave 2 build and verify |
 | 2026-11-04 | Amendment C (proposed): decisions from the 1f-2 build and verify |
 | 2026-11-04 | Amendment C accepted by the owner |
+| 2026-11-04 | Amendment B accepted by the owner |
