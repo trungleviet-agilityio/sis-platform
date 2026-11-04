@@ -184,8 +184,9 @@ class Cli(unittest.TestCase):
     def test_platform_version_is_null_unless_it_matches(self) -> None:
         base = (EXAMPLES / "valid" / "ship-it-serverless.yaml").read_text("utf-8")
         data = json.loads(
-            run_script("-", "--json", stdin=base.replace("version: v0.2.0", "version: " + TWELVE))
-            .stdout
+            run_script(
+                "-", "--json", stdin=base.replace("version: v0.2.0", "version: " + TWELVE)
+            ).stdout
         )
         self.assertIsNone(data["platform_version"])
         ok = json.loads(run_script("-", "--json", stdin=base).stdout)

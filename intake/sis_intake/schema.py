@@ -1,8 +1,8 @@
 """Interpreter for a fixed subset of JSON Schema 2020-12 (stdlib only).
 
 Supported validation keywords: type, enum, const, required, properties,
-additionalProperties, minProperties, propertyNames, items, pattern, minimum, maximum, minItems, and $ref to a
-local "#/$defs/<name>". Annotation and structural keywords ($schema, $id, $defs, title,
+additionalProperties, minProperties, propertyNames, items, pattern, minimum, maximum, minItems, and
+$ref to a local "#/$defs/<name>". Annotation and structural keywords ($schema, $id, $defs, title,
 description) are accepted. Anything else makes check_schema_keywords report a problem.
 """
 

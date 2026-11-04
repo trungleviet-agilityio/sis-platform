@@ -431,9 +431,7 @@ def v08(ctx: Ctx, params: dict[str, Any]) -> list[Hit]:
         )
     needs = [n for n in (work.get("needs") or []) if n in entry["unsupported_needs"]]
     if needs:
-        hits.append(
-            ("workload.needs", "{} cannot provide: {}".format(ctx.kind, ", ".join(needs)))
-        )
+        hits.append(("workload.needs", "{} cannot provide: {}".format(ctx.kind, ", ".join(needs))))
     return hits
 
 

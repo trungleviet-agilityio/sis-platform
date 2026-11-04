@@ -56,7 +56,7 @@ class AgentFrontmatter(unittest.TestCase):
     def test_agent_body_runs_no_command(self) -> None:
         body = (INTAKE_DIR / "agents" / "intake-interviewer.md").read_text("utf-8")
         self.assertNotIn("Bash", body.split("---", 2)[2])
-        self.assertNotIn("validate.py\" -", body)
+        self.assertNotIn('validate.py" -', body)
         self.assertIn("findings", body)
 
 

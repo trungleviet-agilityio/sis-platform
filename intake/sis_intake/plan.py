@@ -1,7 +1,8 @@
 """The resolved plan (ADR 0002 M6) and the Terraform variable slice (M7).
 
 `build_plan` returns the JSON document `validate.py FILE --json` prints. Workflows and env roots
-read only this document. Adding a key is a minor change; renaming or removing one bumps FORMAT_VERSION.
+read only this document. Adding a key is a minor change; renaming or removing one bumps
+FORMAT_VERSION.
 """
 
 from __future__ import annotations
@@ -44,7 +45,6 @@ def _env_plan(
     prefix = manifest["project"]["prefix"]
     entry = compat["runtimes"][view.kind]
     built = entry["built"]
-    workload = manifest.get("workload") or {}
     compliance = manifest.get("compliance") or {}
     data_class = compliance.get("data_class", defaults["compliance"]["data_class"])
     retention = defaults["tiers"][view.tier]["log_retention_days"]
@@ -132,7 +132,9 @@ def build_plan(
         "kind": runtime["kind"],
         "family": entry["family"],
         "arch": runtime.get("arch", defaults["arch"]),
-        "front_door": runtime.get("front_door", defaults["runtimes"][runtime["kind"]]["front_door"]),
+        "front_door": runtime.get(
+            "front_door", defaults["runtimes"][runtime["kind"]]["front_door"]
+        ),
     }
     plan["workload"] = {
         "port": workload.get("port"),

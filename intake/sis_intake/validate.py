@@ -44,8 +44,7 @@ class Report:
     ) -> None:
         # No output ever carries an account-ID-like run, not even an echoed bad value.
         self.findings = [
-            f._replace(path=rules.redact(f.path), message=rules.redact(f.message))
-            for f in findings
+            f._replace(path=rules.redact(f.path), message=rules.redact(f.message)) for f in findings
         ]
         self.manifest = manifest
         self.context = context
