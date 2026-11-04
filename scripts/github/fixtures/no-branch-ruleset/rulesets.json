@@ -1,0 +1,8 @@
+[
+  {
+    "enforcement": "active",
+    "id": 2,
+    "name": "immutable tags",
+    "target": "tag"
+  }
+]

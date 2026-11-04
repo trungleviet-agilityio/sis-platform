@@ -1,0 +1,20 @@
+[
+  {
+    "enforcement": "active",
+    "id": 1,
+    "name": "main protection",
+    "target": "branch"
+  },
+  {
+    "enforcement": "active",
+    "id": 3,
+    "name": "squash only",
+    "target": "branch"
+  },
+  {
+    "enforcement": "active",
+    "id": 2,
+    "name": "immutable tags",
+    "target": "tag"
+  }
+]

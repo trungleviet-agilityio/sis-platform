@@ -1,0 +1,25 @@
+{
+  "bypass_actors": [],
+  "conditions": {
+    "ref_name": {
+      "exclude": [],
+      "include": [
+        "refs/heads/main"
+      ]
+    }
+  },
+  "enforcement": "active",
+  "id": 3,
+  "name": "squash only",
+  "rules": [
+    {
+      "parameters": {
+        "allowed_merge_methods": [
+          "squash"
+        ]
+      },
+      "type": "pull_request"
+    }
+  ],
+  "target": "branch"
+}
