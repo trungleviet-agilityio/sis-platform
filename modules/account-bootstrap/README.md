@@ -19,8 +19,13 @@ header names its source.
     role is inert by design;
   - the nonprod plan role trusts the `pull_request` subject (O14); the prod plan role trusts only `ref:refs/heads/main`
     and `environment:<env>` subjects, never a pull request.
-- Plan role: `ReadOnlyAccess` plus denies on secret values, every `kms:Decrypt`, S3 reads outside the state keys and
-  every action that is not a read (the lock object excepted). Guardrails G1 to G6 are attached to all three roles.
+- Plan role: the managed `ReadOnlyAccess` policy plus denies on secret values, SSM parameter reads, every
+  `kms:Decrypt` and S3 object reads outside the state keys. Its only write is the env's `.tflock` object. Accepted
+  (O14): the data-returning reads that remain are readable by a same-repo PR author in nonprod, and the nonprod plan
+  role can write the lock object (lock interference).
+- Guardrails G1 to G8 are attached to all three roles: secret values, SSM parameters, role chaining, IAM writes and
+  `iam:PassRole` on the gha roles, boundary and OIDC provider, the bootstrap state key, the audit trail and alert
+  resources, the state bucket's own configuration (G7) and the app ECR repository's administration (G8).
 - ECR repository `<prefix>-<env>-app`: immutable tags, scan on push, AES256, lifecycle (untagged expire after 14 days,
   newest 20 tagged images in nonprod, 50 in prod) (T5). Promotion is deferred to Phase 2 (T6).
 - Budget from the plan with actual and forecast alerts at 80 and 100 percent, a Cost Anomaly Detection monitor, the

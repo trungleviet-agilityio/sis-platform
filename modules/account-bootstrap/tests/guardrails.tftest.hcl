@@ -105,6 +105,7 @@ run "guardrails_deny_secrets_ssm_chaining_and_bootstrap" {
         s.sid == "G4DenyBootstrapIamWrites"
         && contains(s.actions, "iam:Create*")
         && contains(s.actions, "iam:*PermissionsBoundary")
+        && contains(s.actions, "iam:PassRole")
         && toset(s.resources) == toset([
           "arn:aws:iam::123456789012:role/sis-dev-gha-*",
           "arn:aws:iam::123456789012:policy/sis-dev-gha-*",
@@ -113,7 +114,7 @@ run "guardrails_deny_secrets_ssm_chaining_and_bootstrap" {
         ])
       )
     ])
-    error_message = "G4 must deny IAM writes on the gha roles and policies, the boundary and the OIDC provider"
+    error_message = "G4 must deny IAM writes and PassRole on the gha roles and policies, the boundary and the OIDC provider"
   }
 
   assert {
@@ -124,6 +125,41 @@ run "guardrails_deny_secrets_ssm_chaining_and_bootstrap" {
       )
     ])
     error_message = "G5 must deny the bootstrap state key"
+  }
+}
+
+run "guardrails_protect_state_bucket_and_ecr_repository" {
+  command = plan
+
+  assert {
+    condition = anytrue([
+      for s in data.aws_iam_policy_document.guardrails.statement : (
+        s.sid == "G7DenyStateBucketAdmin" && s.effect == "Deny"
+        && toset(s.actions) == toset([
+          "s3:PutBucketPolicy", "s3:DeleteBucketPolicy", "s3:PutBucketVersioning", "s3:PutLifecycleConfiguration",
+          "s3:DeleteBucket", "s3:PutBucketPublicAccessBlock", "s3:PutEncryptionConfiguration", "s3:DeleteObjectVersion",
+        ])
+        && toset(s.resources) == toset([
+          "arn:aws:s3:::sis-dev-tfstate-123456789012-ap-southeast-1-an",
+          "arn:aws:s3:::sis-dev-tfstate-123456789012-ap-southeast-1-an/*",
+        ])
+      )
+    ])
+    error_message = "G7 must deny state bucket administration and version deletion on the state bucket"
+  }
+
+  assert {
+    condition = anytrue([
+      for s in data.aws_iam_policy_document.guardrails.statement : (
+        s.sid == "G8DenyEcrRepositoryAdmin" && s.effect == "Deny"
+        && toset(s.actions) == toset([
+          "ecr:SetRepositoryPolicy", "ecr:DeleteRepositoryPolicy", "ecr:DeleteRepository",
+          "ecr:PutLifecyclePolicy", "ecr:DeleteLifecyclePolicy", "ecr:PutImageTagMutability",
+        ])
+        && toset(s.resources) == toset(["arn:aws:ecr:ap-southeast-1:123456789012:repository/sis-dev-app"])
+      )
+    ])
+    error_message = "G8 must deny repository administration on the app ECR repository"
   }
 }
 

@@ -33,9 +33,11 @@ MESSAGES = {
     "P04": "NotAction or NotResource",
     "P05": 'Resource "*" for actions with resource-level support',
     "P06": "",  # varies: two messages, asserted in dedicated tests
-    "P07": "iam:PassRole without an iam:PassedToService condition",
+    "P07": "iam:PassRole",
     "P08": "a write to the boundary policy is allowed",
     "P09": "iam:DeleteRolePermissionsBoundary would strip the boundary",
+    "P10": "",  # two messages (identity writes, trust rewrite), asserted in dedicated tests
+    "P11": "administration of the",
 }
 
 
@@ -67,7 +69,9 @@ class FixtureTests(unittest.TestCase):
     def test_fail_fixtures_report_their_rule(self) -> None:
         files = sorted((FIXTURES / "fail").glob("*.json"))
         rules = {p.name.split("-")[0] for p in files}
-        self.assertEqual(rules, {"P01", "P02", "P03", "P04", "P05", "P06", "P07", "P08", "P09"})
+        self.assertEqual(
+            rules, {"P01", "P02", "P03", "P04", "P05", "P06", "P07", "P08", "P09", "P10", "P11"}
+        )
         for path in files:
             rule = path.name.split("-")[0]
             with self.subTest(fixture=path.name):
@@ -181,6 +185,72 @@ class RuleDetailTests(unittest.TestCase):
             self.assertEqual(
                 run_main([write_doc(Path(tmp), stmt), "--boundary-arn", BOUNDARY])[0], 0
             )
+
+
+class ScopeTests(unittest.TestCase):
+    def fail_text(self, name: str) -> str:
+        code, out = run_main([str(FIXTURES / "fail" / name)])
+        self.assertEqual(code, 1, out)
+        return out
+
+    def test_pass_role_with_condition_but_wildcard_role_fails(self) -> None:
+        out = self.fail_text("P07-pass-role-wildcard-role-with-condition.json")
+        self.assertIn("not role/<prefix>-<env>-<literal>", out)
+        self.assertNotIn("without an iam:PassedToService", out)
+
+    def test_pass_role_without_condition_reports_it(self) -> None:
+        out = self.fail_text("P07-pass-role-without-service.json")
+        self.assertIn("iam:PassRole without an iam:PassedToService condition", out)
+
+    def test_pass_role_never_reaches_gha_roles(self) -> None:
+        self.fail_text("P07-pass-role-gha-role-with-condition.json")
+        self.fail_text("P07-pass-role-env-wildcard-reaches-gha.json")
+
+    def test_pass_role_other_env_and_star_fail(self) -> None:
+        self.fail_text("P07-pass-role-other-env-role.json")
+        self.fail_text("P07-pass-role-resource-star-with-condition.json")
+
+    def test_pass_role_scope_needs_the_boundary_arn(self) -> None:
+        out = self.fail_text("P07-pass-role-no-boundary-arn-given.json")
+        self.assertIn("no boundary ARN given (--boundary-arn)", out)
+
+    def test_identity_writes_name_the_actions(self) -> None:
+        out = self.fail_text("P10-create-access-key.json")
+        self.assertIn("user, group or access key writes are not allowed: iam:CreateAccessKey", out)
+
+    def test_identity_write_wildcard_is_caught(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            stmt = {
+                "Effect": "Allow",
+                "Action": "iam:Create*",
+                "Resource": "arn:aws:iam::123456789012:role/sis-dev-app-*",
+            }
+            code, out = run_main([write_doc(Path(tmp), stmt), "--boundary-arn", BOUNDARY])
+            self.assertEqual(code, 1)
+            self.assertIn("iam:CreateUser", out)
+
+    def test_trust_rewrite_outside_env_roles_fails(self) -> None:
+        for name in (
+            "P10-update-assume-role-any-role.json",
+            "P10-update-assume-role-gha-role.json",
+            "P10-update-assume-role-env-wildcard.json",
+            "P10-update-assume-role-resource-star.json",
+        ):
+            with self.subTest(fixture=name):
+                self.assertIn(
+                    "iam:UpdateAssumeRolePolicy outside role/<prefix>-<env>-<literal>",
+                    self.fail_text(name),
+                )
+
+    def test_state_bucket_and_repository_admin(self) -> None:
+        self.assertIn(
+            "state bucket is allowed: s3:PutBucketPolicy",
+            self.fail_text("P11-state-bucket-policy.json"),
+        )
+        self.assertIn(
+            "app ECR repository is allowed: ecr:SetRepositoryPolicy",
+            self.fail_text("P11-ecr-set-repository-policy.json"),
+        )
 
 
 class PlanTests(unittest.TestCase):

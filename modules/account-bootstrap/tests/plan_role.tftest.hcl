@@ -1,6 +1,6 @@
 # Credit: adapted from ship-it-safely infra/terraform/bootstrap/tests/iam.tftest.hcl (plan role, lab ADR 0007).
-# Plan role (ADR 0002, T4, WA7): ReadOnlyAccess plus explicit denies on secret values, every KMS decrypt, S3 reads
-# outside the state keys, and every action that is not a read, except the state lock object.
+# Plan role (ADR 0002, T4, WA7): ReadOnlyAccess plus explicit denies on secret values, SSM parameter reads, every KMS
+# decrypt and S3 reads outside the state keys. The only write is the state lock object.
 mock_provider "aws" {
   override_during = plan
 
@@ -121,33 +121,8 @@ run "plan_role_denies_s3_reads_outside_state" {
   }
 }
 
-run "plan_role_denies_every_non_read_action" {
+run "plan_role_writes_only_the_lock_object" {
   command = plan
-
-  assert {
-    condition = anytrue([
-      for s in data.aws_iam_policy_document.plan.statement : (
-        s.sid == "DenyNonReadActions" && s.effect == "Deny"
-        && toset(s.not_actions) == toset([
-          "*:Get*", "*:List*", "*:Describe*", "*:Head*",
-          "sts:GetCallerIdentity", "s3:PutObject", "s3:DeleteObject",
-        ])
-        && toset(s.resources) == toset(["*"])
-      )
-    ])
-    error_message = "Deny NotAction must list exactly the read patterns, sts:GetCallerIdentity and the two lock actions"
-  }
-
-  assert {
-    condition = anytrue([
-      for s in data.aws_iam_policy_document.plan.statement : (
-        s.sid == "DenyS3WritesOutsideLock" && s.effect == "Deny"
-        && toset(s.actions) == toset(["s3:PutObject", "s3:DeleteObject"])
-        && toset(s.not_resources) == toset(["arn:aws:s3:::sis-dev-tfstate-123456789012-ap-southeast-1-an/envs/dev/terraform.tfstate.tflock"])
-      )
-    ])
-    error_message = "s3:PutObject and s3:DeleteObject are allowed on the env .tflock key only"
-  }
 
   assert {
     condition = anytrue([
@@ -158,6 +133,43 @@ run "plan_role_denies_every_non_read_action" {
       )
     ])
     error_message = "the lock object is the only place the plan role may write"
+  }
+
+  assert {
+    condition = toset([
+      for s in data.aws_iam_policy_document.plan.statement : s.sid
+      if s.effect == "Allow" && anytrue([for a in s.actions : contains(["s3:PutObject", "s3:DeleteObject"], a)])
+    ]) == toset(["StateLock"])
+    error_message = "no other Allow grants a write"
+  }
+
+  assert {
+    condition = alltrue([
+      for s in data.aws_iam_policy_document.plan.statement : try(length(s.not_actions), 0) == 0
+    ])
+    error_message = "no NotAction anywhere in the plan role policy (IAM wildcards are valid in the action name only)"
+  }
+
+  assert {
+    condition = toset([
+      for s in data.aws_iam_policy_document.plan.statement : s.sid if s.effect == "Deny"
+    ]) == toset(["DenyS3ReadsOutsideState", "DenySecretValueReads", "DenyKmsDecrypt", "DenySsmParameterReads"])
+    error_message = "the explicit denies are secrets, SSM parameter reads, KMS decrypt and S3 reads outside the state keys"
+  }
+}
+
+run "plan_role_denies_ssm_parameter_reads" {
+  command = plan
+
+  assert {
+    condition = anytrue([
+      for s in data.aws_iam_policy_document.plan.statement : (
+        s.sid == "DenySsmParameterReads" && s.effect == "Deny"
+        && toset(s.actions) == toset(["ssm:GetParameter*"])
+        && toset(s.resources) == toset(["*"])
+      )
+    ])
+    error_message = "the plan role must deny SSM parameter reads (SecureString values)"
   }
 }
 

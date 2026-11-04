@@ -18,11 +18,20 @@ Rules (a statement is checked when its Effect is Allow):
   P05 `Resource: "*"` for an action that is not on the no-resource-level-support allowlist
   P06 iam:CreateRole, PutRolePolicy, AttachRolePolicy or PutRolePermissionsBoundary without the
       condition `iam:PermissionsBoundary` equal to the boundary ARN
-  P07 iam:PassRole without an `iam:PassedToService` condition
+  P07 iam:PassRole without an `iam:PassedToService` condition, or on a resource that is not a
+      role named `<prefix>-<env>-<literal>...` (never `-gha-*`, never a wildcard role name)
   P08 a write to the boundary policy itself
   P09 iam:DeleteRolePermissionsBoundary (it strips the boundary)
+  P10 user, group and access key writes (iam:CreateUser, AttachUserPolicy, CreateAccessKey,
+      AddUserToGroup, ...), and iam:UpdateAssumeRolePolicy outside `role/<prefix>-<env>-*`
+  P11 administration of the state bucket (G7) or the app ECR repository (G8): bucket policy,
+      versioning, lifecycle, encryption, version deletion; repository policy, lifecycle, delete
   P00 a policy that is unknown at plan time cannot be checked (fails closed; `--unknown warn`
       only reports it)
+
+The `<prefix>-<env>` name and the account are derived from the boundary ARN
+(`policy/<prefix>-<env>-workload-boundary`), so P07, P10 and P11 need `--boundary-arn` (or a fixture
+`boundary_arn`) to accept any scoped resource.
 
 Exit codes: 0 clean, 1 findings, 2 usage or unreadable input. Standard library only, Python 3.9
 or later. Offline: it never calls AWS.
@@ -70,6 +79,60 @@ POLICY_WRITE_ACTIONS = (
     "iam:TagPolicy",
     "iam:UntagPolicy",
 )
+# Identity writes no composed policy may allow, on any resource (no users, groups or access keys).
+IDENTITY_WRITE_ACTIONS = (
+    "iam:CreateUser",
+    "iam:DeleteUser",
+    "iam:UpdateUser",
+    "iam:AttachUserPolicy",
+    "iam:DetachUserPolicy",
+    "iam:PutUserPolicy",
+    "iam:DeleteUserPolicy",
+    "iam:PutUserPermissionsBoundary",
+    "iam:DeleteUserPermissionsBoundary",
+    "iam:CreateAccessKey",
+    "iam:UpdateAccessKey",
+    "iam:DeleteAccessKey",
+    "iam:CreateLoginProfile",
+    "iam:UpdateLoginProfile",
+    "iam:DeleteLoginProfile",
+    "iam:AddUserToGroup",
+    "iam:RemoveUserFromGroup",
+    "iam:CreateGroup",
+    "iam:DeleteGroup",
+    "iam:UpdateGroup",
+    "iam:AttachGroupPolicy",
+    "iam:DetachGroupPolicy",
+    "iam:PutGroupPolicy",
+    "iam:DeleteGroupPolicy",
+    "iam:CreateServiceSpecificCredential",
+    "iam:UpdateServiceSpecificCredential",
+    "iam:ResetServiceSpecificCredential",
+    "iam:EnableMFADevice",
+    "iam:CreateVirtualMFADevice",
+    "iam:UploadSSHPublicKey",
+    "iam:UploadSigningCertificate",
+)
+# Guardrail G7 (state bucket) and G8 (app ECR repository), mirrored for composed policies.
+STATE_BUCKET_ADMIN_ACTIONS = (
+    "s3:PutBucketPolicy",
+    "s3:DeleteBucketPolicy",
+    "s3:PutBucketVersioning",
+    "s3:PutLifecycleConfiguration",
+    "s3:DeleteBucket",
+    "s3:PutBucketPublicAccessBlock",
+    "s3:PutEncryptionConfiguration",
+    "s3:DeleteObjectVersion",
+)
+ECR_ADMIN_ACTIONS = (
+    "ecr:SetRepositoryPolicy",
+    "ecr:DeleteRepositoryPolicy",
+    "ecr:DeleteRepository",
+    "ecr:PutLifecyclePolicy",
+    "ecr:DeleteLifecyclePolicy",
+    "ecr:PutImageTagMutability",
+)
+GHA_ROLE_SUFFIXES = ("plan", "apply", "deploy", "guardrails")
 POLICY_RESOURCE_TYPES = (
     "aws_iam_policy",
     "aws_iam_role_policy",
@@ -128,8 +191,66 @@ def _condition_values(
     return found
 
 
+def _env_name(boundary_arn: Optional[str]) -> Tuple[Optional[str], str]:
+    """(`<prefix>-<env>`, account ID) from `policy/<prefix>-<env>-workload-boundary`."""
+    match = re.fullmatch(
+        r"arn:[^:]*:iam::([0-9]{12}):policy/(.+)-workload-boundary", boundary_arn or ""
+    )
+    if match is None:
+        return None, "000000000000"
+    return match.group(2), match.group(1)
+
+
+def _role_violations(resources: List[str], env_name: Optional[str]) -> List[str]:
+    """Resources that are not a role `<prefix>-<env>-<literal>...` outside the gha roles."""
+    if env_name is None:
+        return [
+            "no boundary ARN given (--boundary-arn), so the <prefix>-<env> role scope is unknown"
+        ]
+    bad = []
+    for resource in resources:
+        match = re.fullmatch(r"arn:[^:]*:iam::[0-9*]*:role/(.+)", resource)
+        role = match.group(1) if match else ""
+        head = env_name + "-"
+        ok = (
+            role.startswith(head)
+            and "/" not in role
+            and len(role) > len(head)
+            and role[len(head)] not in "*?"
+            and not any(_glob_match(role, f"{head}gha-{x}") for x in GHA_ROLE_SUFFIXES)
+        )
+        if not ok:
+            bad.append(resource)
+    return bad
+
+
+def _hits_state_bucket(resource: str, env_name: Optional[str], account: str) -> bool:
+    if resource == "*":
+        return True
+    if not resource.startswith("arn:") or ":::" not in resource:
+        return False
+    bucket = resource.split(":::", 1)[1].split("/", 1)[0]
+    if env_name is None:
+        return "tfstate" in bucket or bucket == "*"
+    sample = f"{env_name}-tfstate-{account}-ap-southeast-1-an"
+    return _glob_match(bucket, sample) or bucket.startswith(f"{env_name}-tfstate-")
+
+
+def _hits_ecr_repository(resource: str, env_name: Optional[str]) -> bool:
+    if resource == "*":
+        return True
+    match = re.fullmatch(r"arn:[^:]*:ecr:[^:]*:[^:]*:repository/(.+)", resource)
+    if match is None:
+        return False
+    repo = match.group(1)
+    if env_name is None:
+        return repo == "*" or repo.endswith("-app")
+    return _glob_match(repo, f"{env_name}-app")
+
+
 def lint_document(name: str, doc: Dict[str, Any], boundary_arn: Optional[str]) -> List[Finding]:
     findings: List[Finding] = []
+    env_name, account = _env_name(boundary_arn)
     for index, stmt in enumerate(_statements(doc)):
         if stmt.get("Effect") != "Allow":
             continue
@@ -178,11 +299,18 @@ def lint_document(name: str, doc: Dict[str, Any], boundary_arn: Optional[str]) -
                     ", ".join(gated) + " without iam:PermissionsBoundary equal to the boundary ARN",
                 )
 
-        if (
-            _grants(actions, "iam:PassRole")
-            and _condition_values(stmt, "iam:PassedToService", None) is None
-        ):
-            add("P07", "iam:PassRole without an iam:PassedToService condition")
+        if _grants(actions, "iam:PassRole"):
+            problems = []
+            if _condition_values(stmt, "iam:PassedToService", None) is None:
+                problems.append("iam:PassRole without an iam:PassedToService condition")
+            bad_roles = _role_violations(resources, env_name)
+            if bad_roles:
+                problems.append(
+                    "iam:PassRole on a resource that is not role/<prefix>-<env>-<literal> "
+                    "(never -gha-*, never a wildcard role name): " + ", ".join(bad_roles)
+                )
+            if problems:
+                add("P07", "; ".join(problems))
 
         if any(_grants(actions, w) for w in POLICY_WRITE_ACTIONS):
             hits_boundary = any(
@@ -194,6 +322,28 @@ def lint_document(name: str, doc: Dict[str, Any], boundary_arn: Optional[str]) -
 
         if _grants(actions, "iam:DeleteRolePermissionsBoundary"):
             add("P09", "iam:DeleteRolePermissionsBoundary would strip the boundary")
+
+        identity = [a for a in IDENTITY_WRITE_ACTIONS if _grants(actions, a)]
+        if identity:
+            add("P10", "user, group or access key writes are not allowed: " + ", ".join(identity))
+        if _grants(actions, "iam:UpdateAssumeRolePolicy"):
+            bad_roles = _role_violations(resources, env_name)
+            if bad_roles:
+                add(
+                    "P10",
+                    "iam:UpdateAssumeRolePolicy outside role/<prefix>-<env>-<literal> "
+                    "(never -gha-*): " + ", ".join(bad_roles),
+                )
+
+        bucket_admin = [a for a in STATE_BUCKET_ADMIN_ACTIONS if _grants(actions, a)]
+        if bucket_admin and any(_hits_state_bucket(r, env_name, account) for r in resources):
+            add("P11", "administration of the state bucket is allowed: " + ", ".join(bucket_admin))
+        ecr_admin = [a for a in ECR_ADMIN_ACTIONS if _grants(actions, a)]
+        if ecr_admin and any(_hits_ecr_repository(r, env_name) for r in resources):
+            add(
+                "P11",
+                "administration of the app ECR repository is allowed: " + ", ".join(ecr_admin),
+            )
     return findings
 
 

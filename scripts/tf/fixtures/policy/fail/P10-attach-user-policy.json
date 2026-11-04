@@ -1,0 +1,20 @@
+{
+  "documents": [
+    {
+      "name": "P10-attach-user-policy",
+      "policy": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Action": [
+              "iam:AttachUserPolicy"
+            ],
+            "Resource": "arn:aws:iam::123456789012:user/*"
+          }
+        ]
+      }
+    }
+  ],
+  "boundary_arn": "arn:aws:iam::123456789012:policy/sis-dev-workload-boundary"
+}

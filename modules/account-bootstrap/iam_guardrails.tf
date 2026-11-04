@@ -1,5 +1,5 @@
 # Credit: adapted from ship-it-safely infra/terraform/bootstrap/iam_guardrails.tf (lab ADR 0007 S28, B16).
-# T4: guardrails G1 to G6 attached to the plan, apply and deploy roles. Action wildcards appear only in Deny
+# T4: guardrails G1 to G8 attached to the plan, apply and deploy roles. Action wildcards appear only in Deny
 # statements.
 data "aws_iam_policy_document" "guardrails" {
   statement {
@@ -44,6 +44,7 @@ data "aws_iam_policy_document" "guardrails" {
       "iam:Untag*",
       "iam:*PermissionsBoundary",
       "iam:*PolicyVersion",
+      "iam:PassRole",
     ]
     resources = [
       "${local.iam_arn}:role/${local.name}-gha-*",
@@ -58,6 +59,40 @@ data "aws_iam_policy_document" "guardrails" {
     effect    = "Deny"
     actions   = ["s3:GetObject*", "s3:PutObject*", "s3:DeleteObject*"]
     resources = [local.bootstrap_arn]
+  }
+
+  # G7: the state bucket's own configuration and version history. The CI roles use the state keys only; changing the
+  # bucket policy, versioning, lifecycle, encryption or public access block, or deleting versions, is the admin's job.
+  statement {
+    sid    = "G7DenyStateBucketAdmin"
+    effect = "Deny"
+    actions = [
+      "s3:PutBucketPolicy",
+      "s3:DeleteBucketPolicy",
+      "s3:PutBucketVersioning",
+      "s3:PutLifecycleConfiguration",
+      "s3:DeleteBucket",
+      "s3:PutBucketPublicAccessBlock",
+      "s3:PutEncryptionConfiguration",
+      "s3:DeleteObjectVersion",
+    ]
+    resources = [local.bucket_arn, "${local.bucket_arn}/*"]
+  }
+
+  # G8: the app repository's policy, lifecycle and existence. The deploy role pushes images; nobody administers the
+  # repository from CI.
+  statement {
+    sid    = "G8DenyEcrRepositoryAdmin"
+    effect = "Deny"
+    actions = [
+      "ecr:SetRepositoryPolicy",
+      "ecr:DeleteRepositoryPolicy",
+      "ecr:DeleteRepository",
+      "ecr:PutLifecyclePolicy",
+      "ecr:DeleteLifecyclePolicy",
+      "ecr:PutImageTagMutability",
+    ]
+    resources = [local.ecr_repo_app]
   }
 
   # G6: the audit trail, its bucket, the alert rule and the alert topic. No CI role needs any of them; this is

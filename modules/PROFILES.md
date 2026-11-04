@@ -54,9 +54,11 @@ The bootstrap module checks the first group (T8, cheap structural checks). `scri
 | P04 | No `NotAction` or `NotResource` on an `Allow` statement |
 | P05 | `Resource: "*"` only for actions with no resource-level support (the allowlist in `policy.py`) |
 | P06 | `iam:CreateRole`, `iam:PutRolePolicy`, `iam:AttachRolePolicy`, `iam:PutRolePermissionsBoundary` only with the condition `iam:PermissionsBoundary` equal to the boundary ARN |
-| P07 | `iam:PassRole` only with an `iam:PassedToService` condition |
+| P07 | `iam:PassRole` only with an `iam:PassedToService` condition and only on `role/<prefix>-<env>-<literal>...`: never `-gha-*`, never a wildcard role name, never `Resource: "*"` |
 | P08 | No write to the boundary policy itself (policy create, delete, version and tag actions on its ARN) |
 | P09 | No `iam:DeleteRolePermissionsBoundary` (it would strip the boundary) |
+| P10 | No user, group or access key writes (`iam:CreateUser`, `AttachUserPolicy`, `PutUserPolicy`, `CreateAccessKey`, `CreateLoginProfile`, `AddUserToGroup`, `AttachGroupPolicy`, `PutGroupPolicy` and the like). `iam:UpdateAssumeRolePolicy` only on `role/<prefix>-<env>-<literal>...`, never `-gha-*` |
+| P11 | No administration of the state bucket (bucket policy, versioning, lifecycle, encryption, public access block, delete, version deletion; guardrail G7) or of the app ECR repository (repository policy, lifecycle, tag mutability, delete; guardrail G8) |
 | P00 | A policy that is unknown at plan time cannot be checked and fails closed (`--unknown warn` downgrades it) |
 
 ## The boundary

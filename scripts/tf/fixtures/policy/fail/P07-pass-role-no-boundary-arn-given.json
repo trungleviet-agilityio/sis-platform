@@ -1,0 +1,22 @@
+{
+  "documents": [
+    {
+      "name": "P07-pass-role-no-boundary-arn-given",
+      "policy": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Action": "iam:PassRole",
+            "Resource": "arn:aws:iam::123456789012:role/sis-dev-app-exec",
+            "Condition": {
+              "StringEquals": {
+                "iam:PassedToService": "lambda.amazonaws.com"
+              }
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

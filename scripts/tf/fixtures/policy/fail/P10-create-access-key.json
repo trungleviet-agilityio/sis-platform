@@ -1,0 +1,18 @@
+{
+  "documents": [
+    {
+      "name": "P10-create-access-key",
+      "policy": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Action": "iam:CreateAccessKey",
+            "Resource": "arn:aws:iam::123456789012:user/*"
+          }
+        ]
+      }
+    }
+  ],
+  "boundary_arn": "arn:aws:iam::123456789012:policy/sis-dev-workload-boundary"
+}
