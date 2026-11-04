@@ -1,0 +1,25 @@
+{
+  "documents": [
+    {
+      "name": "deny-statements-are-not-linted",
+      "policy": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Deny",
+            "NotAction": [
+              "s3:GetObject"
+            ],
+            "Resource": "*"
+          },
+          {
+            "Effect": "Deny",
+            "Action": "*",
+            "Resource": "*"
+          }
+        ]
+      }
+    }
+  ],
+  "boundary_arn": "arn:aws:iam::123456789012:policy/sis-dev-workload-boundary"
+}

@@ -1,0 +1,18 @@
+{
+  "documents": [
+    {
+      "name": "P10-add-user-to-group",
+      "policy": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Action": "iam:AddUserToGroup",
+            "Resource": "*"
+          }
+        ]
+      }
+    }
+  ],
+  "boundary_arn": "arn:aws:iam::123456789012:policy/sis-dev-workload-boundary"
+}

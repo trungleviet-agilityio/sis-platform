@@ -1,0 +1,20 @@
+{
+  "documents": [
+    {
+      "name": "P11-state-bucket-objects",
+      "policy": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Action": [
+              "s3:DeleteObjectVersion"
+            ],
+            "Resource": "arn:aws:s3:::sis-dev-tfstate-123456789012-ap-southeast-1-an/*"
+          }
+        ]
+      }
+    }
+  ],
+  "boundary_arn": "arn:aws:iam::123456789012:policy/sis-dev-workload-boundary"
+}

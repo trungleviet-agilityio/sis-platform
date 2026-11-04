@@ -1,0 +1,22 @@
+{
+  "documents": [
+    {
+      "name": "star-resource-allowlist",
+      "policy": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Action": [
+              "ecr:GetAuthorizationToken",
+              "ec2:DescribeVpcs",
+              "ec2:Describe*"
+            ],
+            "Resource": "*"
+          }
+        ]
+      }
+    }
+  ],
+  "boundary_arn": "arn:aws:iam::123456789012:policy/sis-dev-workload-boundary"
+}
