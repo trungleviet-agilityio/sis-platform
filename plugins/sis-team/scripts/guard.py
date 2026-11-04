@@ -9,8 +9,8 @@ Claude.
 The GitHub rules (merges, workflow dispatch, `gh api` writes, pushes to main) and the secret file
 rules come from the ship-it-serverless guard (its ADR 0013): the `gh` token in this shell is the
 owner's, so a `gh api` write could approve a pending environment deployment, which runs terraform
-apply. Ideas for the push and secret file rules come from super-board
-(github.com/EricTechPro/super-board, MIT).
+apply. Ideas for the push, secret file, credential literal, path scope and token rules come from
+super-board (github.com/EricTechPro/super-board, MIT).
 """
 
 # The hook runs under the system python3 (3.9 on macOS), so annotations must not be evaluated.
@@ -47,8 +47,22 @@ BLOCKED = [
     (r"\bgh\s+run\s+(rerun|cancel)\b", "workflow run rerun or cancel"),
     (r"\bgh\s+repo\s+(edit|delete|archive|unarchive|rename)\b", "repository settings change"),
     (r"\bgh\s+auth\s+(login|logout|refresh|token|setup-git)\b", "gh sign-in, scopes or token"),
-    (r"\bgh\s+project\s+(delete|close|field-delete)\b", "GitHub Project deletion"),
+    (r"\bgh\s+project\s+(delete|close|field-delete|item-delete)\b", "GitHub Project deletion"),
 ]
+
+# ADR 0002 S2, ideas credited to super-board. The label never echoes the matched text.
+CREDENTIAL_LITERALS = [
+    (r"\bAKIA[0-9A-Z]{16}\b", "credential literal (AWS access key ID)"),
+    (r"\bgh[pousr]_[A-Za-z0-9]{20,}", "credential literal (GitHub token)"),
+    (r"\bgithub_pat_[A-Za-z0-9_]{20,}", "credential literal (GitHub token)"),
+    (r"-----BEGIN [A-Z ]*PRIVATE KEY-----", "credential literal (private key)"),
+]
+
+# ADR 0002 B16: the project-scope token is read only by board.py, and GH_TOKEN is never set in the shell.
+BOARD_TOKEN_ITEM = "sis-board-token"
+# A command that merely searches or records the name (grep, git commit -m) is not a read.
+BOARD_TOKEN_SAFE_COMMANDS = {"grep", "rg", "git"}
+INLINE_TOKEN = re.compile(r"(?<![\w])(GH_TOKEN|GITHUB_TOKEN|GH_ENTERPRISE_TOKEN)=")
 
 PROTECTED_BRANCHES = {"main", "master"}
 
@@ -205,7 +219,22 @@ def check_bash(command: str, cwd: str) -> int:
     for pattern, label in BLOCKED:
         if re.search(pattern, command):
             return block(label)
+    for pattern, label in CREDENTIAL_LITERALS:
+        if re.search(pattern, command):
+            return block(label, "Use the environment or the Keychain through the tool, never a literal.")
+    if INLINE_TOKEN.search(command):
+        return block(
+            "inline GitHub token",
+            "Never set GH_TOKEN or GITHUB_TOKEN in a command; board.py sets it for its own subprocess.",
+        )
     for seg in segments(command):
+        if BOARD_TOKEN_ITEM in seg:
+            leader = os.path.basename((words(seg) or [""])[0])
+            if leader not in BOARD_TOKEN_SAFE_COMMANDS:
+                return block(
+                    "board token read",
+                    "Only board.py reads the sis-board-token Keychain item. Ask the user.",
+                )
         if gh_api_write(seg):
             return block(
                 "gh api write",

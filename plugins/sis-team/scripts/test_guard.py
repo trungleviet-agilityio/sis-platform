@@ -142,6 +142,66 @@ class AllowedCommands(unittest.TestCase):
                 self.assertEqual(done.stderr, "")
 
 
+# Credential-shaped test values are assembled at run time so this file holds no literal for gitleaks.
+FAKE_AWS_KEY = "AK" + "IA" + "ABCDEFGHIJKLMNOP"
+FAKE_GH_PAT = "gh" + "p_" + "a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8"
+FAKE_FINE_PAT = "github" + "_pat_" + "11ABCDEFG0abcdefghijkl_mnopqrstuvwxyz0123456789"
+FAKE_PEM = "-----BEGIN " + "RSA PRIVATE KEY-----"
+
+# Added by ADR 0002 S2 (ideas credited to super-board, MIT).
+S2_COMMAND_CASES = [
+    # credential literals in a command
+    (f"aws s3 ls --access-key {FAKE_AWS_KEY}", "credential literal (AWS access key ID)"),
+    (f"curl -H 'Authorization: token {FAKE_GH_PAT}' https://api.github.com", "credential literal (GitHub token)"),
+    (f"git clone https://{FAKE_FINE_PAT}@github.com/o/r.git", "credential literal (GitHub token)"),
+    (f"echo '{FAKE_PEM}' > k", "credential literal (private key)"),
+    # board project items are never deleted
+    ("gh project item-delete 3 --owner me --id X", "GitHub Project deletion"),
+    # B16: the board token lives in the Keychain and is read only by board.py
+    ("security find-generic-password -s sis-board-token -w", "board token read"),
+    ("TOKEN=$(security find-generic-password -a me -s sis-board-token -w)", "board token read"),
+    ("kc get sis-board-token", "board token read"),
+    ("python3 -c 'print(open(\"sis-board-token\").read())'", "board token read"),
+    # B16: no inline GH_TOKEN or GITHUB_TOKEN
+    ("GH_TOKEN=abc gh project item-list 3", "inline GitHub token"),
+    ("export GH_TOKEN=abc", "inline GitHub token"),
+    ("env GITHUB_TOKEN=abc gh issue list", "inline GitHub token"),
+    ("cd x && GITHUB_TOKEN=\"$T\" gh pr view 1", "inline GitHub token"),
+]
+
+S2_ALLOWED = [
+    "aws s3 ls",
+    "gh project item-list 3 --owner me",
+    "gh project item-add 3 --owner me --url https://github.com/o/r/issues/1",
+    "python3 plugins/sis-team/scripts/board.py status",
+    "grep -rn sis-board-token docs",
+    "git commit -m 'docs: the sis-board-token Keychain item'",
+    "echo $GH_TOKEN_NAME",
+    "gh auth status",
+    "echo AKIA is the AWS key prefix",
+]
+
+
+class S2Commands(unittest.TestCase):
+    def test_blocks(self) -> None:
+        for command, label in S2_COMMAND_CASES:
+            with self.subTest(command=command):
+                done = bash_run(command)
+                self.assertEqual(done.returncode, 2)
+                self.assertIn(f"sis-team guard blocked this call ({label}", done.stderr)
+
+    def test_allows(self) -> None:
+        for command in S2_ALLOWED:
+            with self.subTest(command=command):
+                done = bash_run(command)
+                self.assertEqual(done.returncode, 0)
+                self.assertEqual(done.stderr, "")
+
+    def test_message_never_echoes_the_secret(self) -> None:
+        done = bash_run(f"aws s3 ls --access-key {FAKE_AWS_KEY}")
+        self.assertNotIn(FAKE_AWS_KEY, done.stderr)
+
+
 class FileTools(unittest.TestCase):
     def test_reads(self) -> None:
         self.assertEqual(read("/repo/app/.env"), 2)
