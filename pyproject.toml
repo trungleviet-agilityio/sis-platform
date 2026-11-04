@@ -4,7 +4,7 @@
 [tool.ruff]
 target-version = "py39"
 line-length = 100
-src = ["intake"]
+src = ["intake", "adapters"]
 extend-exclude = ["scripts/ci/fixtures"]
 
 [tool.ruff.lint]
@@ -14,12 +14,24 @@ select = ["E", "W", "F", "I", "N", "UP", "B", "S", "SIM"]
 [tool.ruff.lint.per-file-ignores]
 # Tests assert and run the CLI as a subprocess on purpose.
 "intake/tests/**" = ["S101", "S603", "S607"]
+# unittest-style tests in adapters/ and plugins/ use plain assert helpers.
+"adapters/tests/**" = ["S101"]
+"plugins/**/test_*.py" = ["S101"]
 # The CI guard script keeps PyYAML as a lazy import and targets the dev interpreter.
 "scripts/**" = ["UP006", "UP007", "UP035", "UP045"]
 
 [tool.mypy]
 python_version = "3.9"
-files = ["intake/sis_intake", "intake/tests"]
+files = [
+  "intake/sis_intake",
+  "intake/tests",
+  "scripts",
+  "plugins/sis-team/scripts",
+  "plugins/sis-team/skills/diagram/scripts",
+  "plugins/sis-team/skills/team/scripts",
+  "adapters/contract_check.py",
+  "adapters/tests",
+]
 mypy_path = "intake"
 strict = true
 warn_unreachable = true

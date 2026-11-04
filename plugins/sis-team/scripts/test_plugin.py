@@ -46,7 +46,7 @@ def frontmatter(path: str) -> dict[str, str]:
 
 
 def plugin_files() -> list[str]:
-    found = []
+    found: list[str] = []
     for base in (PLUGIN, os.path.join(ROOT, ".claude-plugin")):
         for dirpath, _dirs, files in os.walk(base):
             found.extend(os.path.join(dirpath, f) for f in files if not f.endswith(".pyc"))
@@ -80,7 +80,9 @@ class Manifest(unittest.TestCase):
     def test_plugin_json(self) -> None:
         data = load_json(os.path.join(PLUGIN, ".claude-plugin", "plugin.json"))
         self.assertEqual(data["name"], "sis-team")
-        self.assertEqual(data["repository"], "https://github.com/trungleviet-agilityio/sis-platform")
+        self.assertEqual(
+            data["repository"], "https://github.com/trungleviet-agilityio/sis-platform"
+        )
         self.assertRegex(str(data["version"]), r"^\d+\.\d+\.\d+$")
 
     def test_hook_covers_read_and_write_tools(self) -> None:
