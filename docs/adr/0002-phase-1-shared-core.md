@@ -1,6 +1,6 @@
 # ADR 0002: Phase 1, the shared core and the contracts Phase 2 builds on
 
-- Status: proposed
+- Status: accepted (owner, 2026-11-04)
 - Date: 2026-11-04 (revised 2026-11-04 after the challenger review, see Change log)
 - Deciders: owner (accepts), solution-architect (drafts)
 - Amends ADR 0001: P4, P9, P13 (T6 deferred), M (adds M6 to M10), O2, O4, O6, O8 (prod plan), A5, B1, B3, B6,
