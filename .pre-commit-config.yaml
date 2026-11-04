@@ -38,9 +38,9 @@ repos:
     rev: 25bcf95026b96e2dd3c0aec3090c3d6ef6ca2e6c # frozen: v0.17.3
     hooks:
       - id: ruff-check
-        files: ^(intake/|scripts/).*\.py$
+        files: ^(intake|scripts|plugins|adapters)/.*\.py$
       - id: ruff-format
-        files: ^(intake/|scripts/).*\.py$
+        files: ^(intake|scripts|plugins|adapters)/.*\.py$
 
   # mypy runs from the hash-locked CI venv (make venv), so mypy and types-PyYAML are hash-locked in
   # scripts/ci/requirements.txt; pre-commit additional_dependencies cannot carry hashes (ADR 0002 H7).
@@ -53,7 +53,7 @@ repos:
         entry: .venv-ci/bin/mypy
         # Check the files listed in pyproject.toml as one program, with its strict settings.
         pass_filenames: false
-        files: ^(intake/.*\.py|pyproject\.toml)$
+        files: ^((intake|scripts|plugins|adapters)/.*\.py|pyproject\.toml)$
 
   # Cross-check the schema with a real JSON Schema library (ADR 0001 Z4); the runtime never imports one.
   - repo: https://github.com/python-jsonschema/check-jsonschema

@@ -285,7 +285,8 @@ def harden_problems(job: dict[str, Any], credentialed: bool) -> list[str]:
     problems = [
         f"harden-runner must not set `{k}:`" for k in ("if", "continue-on-error") if k in first
     ]
-    with_ = first.get("with") if isinstance(first.get("with"), dict) else {}
+    raw_with = first.get("with")
+    with_: dict[str, Any] = raw_with if isinstance(raw_with, dict) else {}
     policy = with_.get("egress-policy")
     if credentialed:
         if policy != "block":

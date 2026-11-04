@@ -1,7 +1,8 @@
 """Cross-field checks for an adapter result line (contract v1). Stdlib only, Python 3.9 compatible.
 
-The JSON Schemas in this directory stay inside the Z4 keyword subset, so rules that relate two fields live here.
-The Phase 2 conformance suite (K7) imports this module; so do the schema tests.
+The JSON Schemas in this directory stay inside the Z4 keyword subset, so rules that relate two
+fields live here. The Phase 2 conformance suite (K7) imports this module; so do the schema
+tests.
 
     from contract_check import check_line
     problems = check_line(doc, verb="deploy", exit_code=0, inputs=os.environ)
@@ -10,6 +11,8 @@ The Phase 2 conformance suite (K7) imports this module; so do the schema tests.
 import json
 import os
 import sys
+from collections.abc import Mapping
+from typing import Any, Optional
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -29,20 +32,27 @@ EXIT_STATES = {
 }
 
 
-def load_schema(name):
+def load_schema(name: str) -> dict[str, Any]:
     with open(os.path.join(HERE, name), encoding="utf-8") as fh:
-        return json.load(fh)
+        schema: dict[str, Any] = json.load(fh)
+    return schema
 
 
-def release_id(env, digest):
+def release_id(env: str, digest: str) -> str:
     """K5: <env>-<first 12 hex of the digest>."""
-    return "%s-%s" % (env, digest[len("sha256:"):][:12])
+    return "{}-{}".format(env, digest[len("sha256:") :][:12])
 
 
-def check_line(doc, verb=None, exit_code=None, inputs=None):
+def check_line(
+    doc: dict[str, Any],
+    verb: Optional[str] = None,
+    exit_code: Optional[int] = None,
+    inputs: Optional[Mapping[str, str]] = None,
+) -> list[str]:
     """Schema plus cross-field rules. Returns a list of problem strings (empty means valid).
 
-    verb: the verb that ran. exit_code: its exit code. inputs: a mapping of the SIS_* variables it ran with.
+    verb: the verb that ran. exit_code: its exit code.
+    inputs: a mapping of the SIS_* variables it ran with.
     """
     out = [i.message for i in z4.validate(doc, load_schema("result.schema.json"))]
     if out:
@@ -50,9 +60,9 @@ def check_line(doc, verb=None, exit_code=None, inputs=None):
     if doc["release_id"] != release_id(doc["env"], doc["digest"]):
         out.append("release_id must be <env>-<first 12 hex of the digest> (K5)")
     if verb is not None and doc["verb"] != verb:
-        out.append("verb %r does not match the verb that ran (%r)" % (doc["verb"], verb))
+        out.append("verb {!r} does not match the verb that ran ({!r})".format(doc["verb"], verb))
     if exit_code is not None and doc["state"] not in EXIT_STATES[exit_code]:
-        out.append("state %r is not allowed with exit code %d (K4)" % (doc["state"], exit_code))
+        out.append(f"state {doc['state']!r} is not allowed with exit code {exit_code} (K4)")
     pct = doc["traffic"]["candidate_percent"]
     if doc["state"] == "succeeded" and pct != 100:
         out.append("succeeded needs candidate_percent 100 (1g addition)")
@@ -63,16 +73,20 @@ def check_line(doc, verb=None, exit_code=None, inputs=None):
     return out
 
 
-def _check_inputs(doc, inputs):
-    out = []
+def _check_inputs(doc: dict[str, Any], inputs: Mapping[str, str]) -> list[str]:
+    out: list[str] = []
     # In rollback, SIS_PREV_DIGEST is the target that becomes live; the line describes the target.
     want = inputs.get("SIS_PREV_DIGEST") if doc["verb"] == "rollback" else inputs.get("SIS_DIGEST")
     if want is not None and doc["digest"] != want:
         which = "SIS_PREV_DIGEST" if doc["verb"] == "rollback" else "SIS_DIGEST"
-        out.append("digest must equal %s" % which)
+        out.append(f"digest must equal {which}")
     if inputs.get("SIS_ENV") is not None and doc["env"] != inputs["SIS_ENV"]:
         out.append("env must equal SIS_ENV")
     # SIS_SHA belongs to SIS_DIGEST, so it is only echoed for the verbs that act on that digest.
-    if doc["verb"] != "rollback" and inputs.get("SIS_SHA") is not None and doc["sha"] != inputs["SIS_SHA"]:
+    if (
+        doc["verb"] != "rollback"
+        and inputs.get("SIS_SHA") is not None
+        and doc["sha"] != inputs["SIS_SHA"]
+    ):
         out.append("sha must equal SIS_SHA")
     return out
