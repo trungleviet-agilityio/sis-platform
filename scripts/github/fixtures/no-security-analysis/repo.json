@@ -1,0 +1,6 @@
+{
+  "default_branch": "main",
+  "name": "sis-platform-canary",
+  "private": false,
+  "visibility": "public"
+}
