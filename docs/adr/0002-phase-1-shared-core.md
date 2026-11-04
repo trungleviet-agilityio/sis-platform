@@ -545,9 +545,9 @@ Merge order: 1a, 1b, 1c, 1e, 1g, 1f-3, 1d, 1f-1, 1f-2.
 | Tests first | Self-test with recorded JSON |
 | Done | bash 3.2 compatible; no write verb |
 
-## Amendment A (2026-11-04, proposed): decisions from the wave 1 build and verify
+## Amendment A (2026-11-04): decisions from the wave 1 build and verify
 
-- Status: proposed (owner to accept with the wave 1 PRs)
+- Status: accepted (owner, 2026-11-04)
 - Source: peer reviews of 1a, 1b, 1c, 1e, 1g and 1f-3, and the wave 1 verify (e2e, reviewer, security-reviewer,
   code-simplifier) on the integration branch.
 
@@ -576,4 +576,4 @@ rulesets, and the event refusal of AA3 in a live run.
 |---|---|
 | 2026-11-04 | Drafted |
 | 2026-11-04 | Revised after challenger review C1 to C27: every trusted SHA checked remotely (L3); both environments gated, public canary (F30); claims smoke before any account (O12); trust moves batched (L7); fail-closed sparse closure (L2, O11); plan role denies and prod plan from `main` (T4, O14); escalation lint and boundary (T11); one full policy linter (T8); promotion deferred (T6); environment secret mechanism documented with a fallback (O13, F29); detective baseline (T7); ECR lifecycle (T5); separate board token (B16) and a before-build checkpoint; parallel sub-PR waves; WA findings added (M10, D18 to D21, H10, B14) or recorded with their phase |
-| 2026-11-04 | Amendment A (proposed): decisions from the wave 1 build and verify |
+| 2026-11-04 | Amendment A: decisions from the wave 1 build and verify (accepted by the owner) |
