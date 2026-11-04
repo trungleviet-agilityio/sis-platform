@@ -6,7 +6,14 @@ description: Interview the user about a product idea and produce three drafts fo
 # sis-platform intake
 
 Turn a product idea into a validated `platform.yaml` manifest by interviewing the user, then return three drafts as
-text. You write nothing into the project repo: the orchestrating session in the project repo writes the drafts.
+text. Nothing is written into the project repo: the orchestrating session in the project repo writes the drafts.
+
+Two roles:
+
+- The `intake-interviewer` agent (tools: Read, Grep, Glob; no Bash) runs the interview and returns the draft
+  manifest as text. It cannot run the validator.
+- This skill runs in the orchestrating session. That session pipes the draft to the validator on stdin and sends the
+  findings back to the interviewer until there are 0 errors (the loop in Procedure step 3).
 
 ## Rules
 
@@ -22,21 +29,21 @@ text. You write nothing into the project repo: the orchestrating session in the 
 - Never ask for, accept or write an AWS account ID. Accounts are labels (`dev`, `prod`). If the user pastes a
   12-digit number, ask them to use a label (rule V10).
 - Never run AWS, Terraform or `gh` write commands. Never write into the project repo, and write no temp file. The
-  only command you run is the validator below, with the draft on stdin.
+  only command the orchestrating session runs for this skill is the validator below, with the draft on stdin.
 - The manifest uses a YAML subset: block maps and lists, plain or quoted scalars, int, bool, null, comments, one-line
   flow lists and flow maps. No anchors, aliases, tags, multi-line scalars or nested flow maps. Quote strings that look
-  like numbers, dates or yes/no.
+  like numbers, dates or yes/no. Env names are lowercase, start with a letter, and have at most 15 characters.
 
 ## Procedure
 
-1. Run the interview, Q1 to Q9 (and Q10 when it applies). If Q10 answers retire, retain, relocate or repurchase,
-   stop and return a short note instead of a manifest.
-2. Draft the manifest. Start from the example closest to the answers in `${CLAUDE_PLUGIN_ROOT}/examples/valid/`
-   and `schema_version: 1`. Every manifest needs `project.owner` (a GitHub login or team handle, never an email),
-   `budget.monthly_usd`, and a `tier` (`prod` or `nonprod`) on each env. A `prod` tier env also needs
-   `compliance.data_class`, `dr.rto_minutes`, `dr.rpo_minutes`, `workload.peak_rps` and `workload.p95_ms`. Keep
-   the draft in the conversation; write no file.
-3. Validate by sending the draft to the validator on stdin:
+1. Run the interview (the interviewer agent), Q1 to Q9 (and Q10 when it applies). If Q10 answers retire, retain,
+   relocate or repurchase, stop and return a short note instead of a manifest.
+2. The interviewer drafts the manifest from the example closest to the answers in
+   `${CLAUDE_PLUGIN_ROOT}/examples/valid/` and `schema_version: 1`, and returns it as text. Every manifest needs
+   `project.owner` (a GitHub login or team handle, never an email), `budget.monthly_usd`, and a `tier` (`prod` or
+   `nonprod`) on each env. A `prod` tier env also needs `compliance.data_class`, `dr.rto_minutes`, `dr.rpo_minutes`,
+   `workload.peak_rps` and `workload.p95_ms`.
+3. The orchestrating session validates the draft by sending it to the validator on stdin:
 
    ```
    python3 "${CLAUDE_PLUGIN_ROOT}/sis_intake/validate.py" - <<'YAML'
@@ -44,10 +51,10 @@ text. You write nothing into the project repo: the orchestrating session in the 
    YAML
    ```
 
-   Exit code 0 means valid, 1 means errors, 2 means a parse or usage error. Read each finding (`id`, `path`,
-   `message`, pillars). Fix every error by changing the manifest or by asking the user a follow-up question, then
-   run the validator again. Loop until there are 0 errors. Explain each remaining warning to the user and ask whether
-   to accept it or change the answer.
+   Exit code 0 means valid, 1 means errors, 2 means a parse or usage error. Send each finding (`id`, `path`,
+   `message`, pillars) back to the interviewer. It fixes every error by changing the manifest or by asking the user a
+   follow-up question, and returns a new draft; validate again. Loop until there are 0 errors. Explain each remaining
+   warning to the user and ask whether to accept it or change the answer.
 4. Report the resolved `engine` and `deploy_role_profile` per env that the validator prints.
 5. Return the three drafts below as text in one reply, then stop.
 

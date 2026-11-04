@@ -342,6 +342,48 @@ class RuleCases(unittest.TestCase):
         self.assert_fires("V08", ws)
         self.assert_quiet("V08", ecs)
 
+    def test_v10_hyphenated_form_and_hex_boundaries(self) -> None:
+        def v10(text: str) -> bool:
+            return "V10" in fired(base_manifest(), raw_text=text)
+
+        self.assertTrue(v10("# id " + "-".join(["9999"] * 3) + "\n"))
+        self.assertFalse(v10("# doc example 1234-5678-9012\n"))
+        self.assertFalse(v10("sha: " + "a" + TWELVE + "b" + "c" * 27 + "\n"))
+        self.assertFalse(v10("sha: " + "9" * 3 + "a" + TWELVE + "\n"))
+        self.assertTrue(v10("id=" + TWELVE + ";\n"))
+        walked = base_manifest()
+        walked["workload"]["health_path"] = "/x/" + "-".join(["9999"] * 3)
+        self.assert_fires("V10", walked)
+
+    def test_redact(self) -> None:
+        hyphen = "-".join(["9999"] * 3)
+        text = f"bad {TWELVE} and {hyphen} but 1234-5678-9012 stays"
+        out = rules.redact(text)
+        self.assertNotIn(TWELVE, out)
+        self.assertNotIn(hyphen, out)
+        self.assertIn("1234-5678-9012", out)
+
+    def test_v16_v21_flags_come_from_data(self) -> None:
+        flags = rules.env_flag_names(rules.load_compat())
+        self.assertEqual(flags, {"scale_to_zero", "fargate_spot"})
+        compat = rules.load_compat()
+        compat["runtimes"]["lambda-web"]["env_flags"].append("warm_pool")
+        self.assertIn("warm_pool", rules.env_flag_names(compat))
+
+    def test_v19_normalises_case_and_trailing_slash(self) -> None:
+        for probe in ("/Health", "/health/"):
+            m = set_release(
+                base_manifest(),
+                "dev",
+                strategy="canary",
+                steps=[10, 100],
+                bake_minutes=5,
+                rollback="alarm",
+                probes=[probe],
+            )
+            with self.subTest(probe=probe):
+                self.assert_fires("V19", m)
+
     def test_v10_scans_raw_text_including_comments(self) -> None:
         raw_bad = "# account " + TWELVE + "\nschema_version: 1\n"
         raw_ok = "# account 12345\nschema_version: 1\n"
@@ -475,10 +517,18 @@ class RuleCases(unittest.TestCase):
 
     def test_compat_data_drives_predicates(self) -> None:
         compat = rules.load_compat()
-        compat["runtimes"]["lambda-web"]["family"] = "other"
+        compat["runtimes"]["lambda-web"]["limits"] = {}
+        compat["runtimes"]["lambda-web"]["unsupported_needs"] = []
         big = base_manifest()
         big["workload"]["max_payload_mb"] = 10
+        big["workload"]["needs"] = ["websockets"]
+        self.assert_fires("V08", big)
         self.assert_quiet("V08", big, compat)
+        compat = rules.load_compat()
+        compat["runtimes"]["ecs-fargate"]["limits"] = {"max_payload_mb": 2}
+        ecs_big = ecs_manifest()
+        ecs_big["workload"]["max_payload_mb"] = 3
+        self.assert_fires("V08", ecs_big, compat)
         compat = rules.load_compat()
         compat["runtimes"]["lambda-web"]["gitops"] = True
         gitops = base_manifest()

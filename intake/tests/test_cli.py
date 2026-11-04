@@ -158,6 +158,57 @@ class Cli(unittest.TestCase):
         self.assertIsNone(dev["promote_from"])
         self.assertEqual(prod["prefix"], "sis")
 
+    def leak_texts(self) -> list[str]:
+        base = (EXAMPLES / "valid" / "ship-it-serverless.yaml").read_text("utf-8")
+        hyphen = "-".join(["9999"] * 3)
+        return [
+            base.replace("version: v0.2.0", "version: " + TWELVE),
+            base.replace("account: dev", 'account: "' + TWELVE + '"'),
+            base.replace("account: dev", 'account: "' + hyphen + '"'),
+            base.replace("owner: trungleviet-agilityio", "owner: " + TWELVE),
+            "# note " + TWELVE + "\n" + base,
+            base.replace("health_path: /health", "health_path: /" + hyphen),
+        ]
+
+    def test_no_account_id_in_any_output(self) -> None:
+        digits = TWELVE + "|" + "-".join(["9999"] * 3)
+        for index, text in enumerate(self.leak_texts()):
+            for args in (("--json",), ()):
+                with self.subTest(case=index, args=args):
+                    proc = run_script("-", *args, stdin=text)
+                    self.assertEqual(proc.returncode, 1)
+                    for needle in digits.split("|"):
+                        self.assertNotIn(needle, proc.stdout)
+                        self.assertNotIn(needle, proc.stderr)
+
+    def test_platform_version_is_null_unless_it_matches(self) -> None:
+        base = (EXAMPLES / "valid" / "ship-it-serverless.yaml").read_text("utf-8")
+        data = json.loads(
+            run_script("-", "--json", stdin=base.replace("version: v0.2.0", "version: " + TWELVE))
+            .stdout
+        )
+        self.assertIsNone(data["platform_version"])
+        ok = json.loads(run_script("-", "--json", stdin=base).stdout)
+        self.assertEqual(ok["platform_version"], "v0.2.0")
+
+    def test_envs_are_sorted_and_p95_is_one_value(self) -> None:
+        base = (EXAMPLES / "valid" / "ship-it-serverless.yaml").read_text("utf-8")
+        data = json.loads(run_script("-", "--json", stdin=base).stdout)
+        self.assertEqual(list(data["envs"]), sorted(data["envs"]))
+        no_p95 = base.replace(", p95_ms: 500", "")
+        data = json.loads(run_script("-", "--json", stdin=no_p95).stdout)
+        self.assertEqual(data["workload"]["p95_ms"], 1000)
+        for env in data["envs"].values():
+            self.assertEqual(env["observability"]["slo"]["p95_ms"], data["workload"]["p95_ms"])
+
+    def test_nonprod_without_probes_has_no_probe_alarm(self) -> None:
+        text = (EXAMPLES / "valid" / "minimal.yaml").read_text("utf-8")
+        data = json.loads(run_script("-", "--json", stdin=text).stdout)
+        alarms = data["envs"]["dev"]["observability"]["alarms"]
+        self.assertEqual(data["envs"]["dev"]["probes"], [])
+        self.assertNotIn("demo-dev-probe-failures", alarms)
+        self.assertIn("demo-dev-5xx-rate", alarms)
+
     def test_json_for_a_schema_invalid_manifest_keeps_the_shape(self) -> None:
         proc = run_script(str(EXAMPLES / "invalid" / "unknown-key.yaml"), "--json")
         self.assertEqual(proc.returncode, 1)

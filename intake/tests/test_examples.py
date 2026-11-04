@@ -14,7 +14,14 @@ EXPECT = re.compile(r"^# expect: (\S+)\s*$")
 
 ERROR_RULES = {f"V{n:02d}" for n in (1, 2, 3, 4, 5, 8, 9, 10, 11, 12, *range(19, 26))}
 V20_FILES = {"promote-unknown.yaml", "promote-cycle.yaml", "shared-account.yaml"}
-SCHEMA_FILES = {"no-budget.yaml", "no-owner.yaml", "no-tier.yaml", "unknown-key.yaml"}
+SCHEMA_FILES = {
+    "no-budget.yaml",
+    "no-owner.yaml",
+    "no-tier.yaml",
+    "unknown-key.yaml",
+    "env-name-uppercase.yaml",
+    "env-name-too-long.yaml",
+}
 
 
 def expected_id(path: Path) -> str:

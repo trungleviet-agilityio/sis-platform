@@ -41,21 +41,23 @@ class AgentFrontmatter(unittest.TestCase):
             out[key.strip()] = value.strip()
         return out
 
-    def test_bash_is_narrowed_to_the_validator(self) -> None:
-        tools = self.frontmatter()["tools"]
-        self.assertNotRegex(tools, r"\bBash\b(?!\()")
-        self.assertIn("Bash(python3 ", tools)
-        self.assertIn("validate.py", tools)
-        for forbidden in ("Write", "Edit", "NotebookEdit"):
-            self.assertNotIn(forbidden, tools)
+    def test_agent_has_read_only_tools_and_no_bash(self) -> None:
+        tools = [t.strip() for t in self.frontmatter()["tools"].split(",")]
+        self.assertEqual(tools, ["Read", "Grep", "Glob"])
 
-    def test_no_temp_file_instructions(self) -> None:
-        body = (INTAKE_DIR / "agents" / "intake-interviewer.md").read_text("utf-8")
+    def test_skill_documents_the_validation_loop(self) -> None:
         skill = (INTAKE_DIR / "skills" / "intake" / "SKILL.md").read_text("utf-8")
-        for text in (body, skill):
-            self.assertNotIn("temp-file", text)
-            self.assertNotIn("temporary file", text)
-            self.assertIn("stdin", text)
+        self.assertIn('validate.py" -', skill)
+        self.assertIn("stdin", skill)
+        self.assertIn("intake-interviewer", skill)
+        self.assertNotIn("temp-file", skill)
+        self.assertNotIn("temporary file", skill)
+
+    def test_agent_body_runs_no_command(self) -> None:
+        body = (INTAKE_DIR / "agents" / "intake-interviewer.md").read_text("utf-8")
+        self.assertNotIn("Bash", body.split("---", 2)[2])
+        self.assertNotIn("validate.py\" -", body)
+        self.assertIn("findings", body)
 
 
 class NoDashes(unittest.TestCase):

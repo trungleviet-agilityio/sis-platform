@@ -1,7 +1,7 @@
 """Interpreter for a fixed subset of JSON Schema 2020-12 (stdlib only).
 
 Supported validation keywords: type, enum, const, required, properties,
-additionalProperties, minProperties, items, pattern, minimum, maximum, minItems, and $ref to a
+additionalProperties, minProperties, propertyNames, items, pattern, minimum, maximum, minItems, and $ref to a
 local "#/$defs/<name>". Annotation and structural keywords ($schema, $id, $defs, title,
 description) are accepted. Anything else makes check_schema_keywords report a problem.
 """
@@ -25,6 +25,7 @@ VALIDATION_KEYWORDS = frozenset(
         "maximum",
         "minItems",
         "minProperties",
+        "propertyNames",
         "$ref",
     }
 )
@@ -49,7 +50,7 @@ def check_schema_keywords(schema: Any, path: str = "") -> list[str]:
         elif key in ("properties", "$defs") and isinstance(value, dict):
             for name, sub in value.items():
                 problems.extend(check_schema_keywords(sub, where + "/" + name))
-        elif key in ("items", "additionalProperties"):
+        elif key in ("items", "additionalProperties", "propertyNames"):
             problems.extend(check_schema_keywords(value, where))
     return problems
 
@@ -159,6 +160,9 @@ def _check_object(
     for key in schema.get("required", []):
         if key not in value:
             out.append(SchemaIssue(path, f"missing required key '{key}'"))
+    if "propertyNames" in schema:
+        for name in value:
+            _check(name, schema["propertyNames"], root, _join(path, name), out)
     props = schema.get("properties", {})
     extra = schema.get("additionalProperties", True)
     for key, item in value.items():

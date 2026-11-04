@@ -120,6 +120,9 @@ class DataKeys(unittest.TestCase):
                 self.assertNotIn("all-at-once", entry["two_versions_live"])
                 self.assertTrue(set(entry["env_flags"]) <= {"scale_to_zero", "fargate_spot"})
                 self.assertGreaterEqual(len(entry["alarms"]), 1)
+                self.assertTrue(set(entry["probe_alarms"]) <= set(entry["alarms"]))
+                self.assertIsInstance(entry["limits"], dict)
+                self.assertIsInstance(entry["unsupported_needs"], list)
                 self.assertNotIn("adapter_built", entry)
                 if kind in families:
                     self.assertEqual(entry["family"], families[kind])
@@ -131,6 +134,27 @@ class DataKeys(unittest.TestCase):
             compat["runtimes"]["lambda-web"]["alarms"],
             ["5xx-rate", "p95-latency", "throttles", "probe-failures"],
         )
+
+    def test_lambda_limits_are_data(self) -> None:
+        runtimes = rules.load_compat()["runtimes"]
+        for kind in ("lambda-web", "lambda-events"):
+            self.assertEqual(
+                runtimes[kind]["limits"], {"max_duration_seconds": 900, "max_payload_mb": 6}
+            )
+            self.assertEqual(
+                runtimes[kind]["unsupported_needs"], ["gpu", "os", "licence", "websockets"]
+            )
+        self.assertEqual(runtimes["ecs-fargate"]["limits"], {})
+        self.assertEqual(runtimes["ecs-fargate"]["unsupported_needs"], [])
+
+    def test_env_flags_are_the_schema_booleans(self) -> None:
+        sch = json.loads((INTAKE_DIR / "schema" / "platform.schema.json").read_text("utf-8"))
+        props = sch["$defs"]["env"]["properties"]
+        booleans = {k for k, v in props.items() if v.get("type") == "boolean"}
+        compat = rules.load_compat()
+        used = {f for e in compat["runtimes"].values() for f in e["env_flags"]}
+        self.assertEqual(used, booleans)
+        self.assertEqual(rules.env_flag_names(compat), booleans)
 
     def test_built_flags_are_all_false_in_phase_1(self) -> None:
         compat = rules.load_compat()

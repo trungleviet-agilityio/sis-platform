@@ -4,113 +4,291 @@
   "runtimes": {
     "lambda-web": {
       "family": "lambda",
-      "strategies": ["all-at-once", "canary", "linear"],
-      "engines": ["pipeline", "codedeploy"],
+      "strategies": [
+        "all-at-once",
+        "canary",
+        "linear"
+      ],
+      "engines": [
+        "pipeline",
+        "codedeploy"
+      ],
       "auto_engine": "pipeline",
       "engine_strategies": {},
       "gradual_needs_alb": false,
       "gitops": false,
       "fixed_monthly_usd": 0,
-      "two_versions_live": ["canary", "linear"],
-      "env_flags": ["scale_to_zero"],
-      "alarms": ["5xx-rate", "p95-latency", "throttles", "probe-failures"],
+      "two_versions_live": [
+        "canary",
+        "linear"
+      ],
+      "env_flags": [
+        "scale_to_zero"
+      ],
+      "alarms": [
+        "5xx-rate",
+        "p95-latency",
+        "throttles",
+        "probe-failures"
+      ],
       "hints": {
         "rolling": "alias flip = all-at-once; use all-at-once, canary or linear",
         "blue-green": "alias flip = all-at-once; use all-at-once, canary or linear"
       },
       "built": {
         "runtime": false,
-        "engines": {"pipeline": false, "codedeploy": false},
-        "delivery": {"push": false, "gitops": false},
-        "profiles": {"lambda-alias": false, "codedeploy-lambda": false}
-      }
+        "engines": {
+          "pipeline": false,
+          "codedeploy": false
+        },
+        "delivery": {
+          "push": false,
+          "gitops": false
+        },
+        "profiles": {
+          "lambda-alias": false,
+          "codedeploy-lambda": false
+        }
+      },
+      "limits": {
+        "max_duration_seconds": 900,
+        "max_payload_mb": 6
+      },
+      "unsupported_needs": [
+        "gpu",
+        "os",
+        "licence",
+        "websockets"
+      ],
+      "probe_alarms": [
+        "probe-failures"
+      ]
     },
     "lambda-events": {
       "family": "lambda",
-      "strategies": ["all-at-once", "canary", "linear"],
-      "engines": ["pipeline", "codedeploy"],
+      "strategies": [
+        "all-at-once",
+        "canary",
+        "linear"
+      ],
+      "engines": [
+        "pipeline",
+        "codedeploy"
+      ],
       "auto_engine": "pipeline",
       "engine_strategies": {},
       "gradual_needs_alb": false,
       "gitops": false,
       "fixed_monthly_usd": 0,
-      "two_versions_live": ["canary", "linear"],
-      "env_flags": ["scale_to_zero"],
-      "alarms": ["errors", "throttles", "dlq-depth"],
+      "two_versions_live": [
+        "canary",
+        "linear"
+      ],
+      "env_flags": [
+        "scale_to_zero"
+      ],
+      "alarms": [
+        "errors",
+        "throttles",
+        "dlq-depth"
+      ],
       "hints": {
         "rolling": "alias flip = all-at-once; use all-at-once, canary or linear",
         "blue-green": "alias flip = all-at-once; use all-at-once, canary or linear"
       },
       "built": {
         "runtime": false,
-        "engines": {"pipeline": false, "codedeploy": false},
-        "delivery": {"push": false, "gitops": false},
-        "profiles": {"lambda-alias": false, "codedeploy-lambda": false}
-      }
+        "engines": {
+          "pipeline": false,
+          "codedeploy": false
+        },
+        "delivery": {
+          "push": false,
+          "gitops": false
+        },
+        "profiles": {
+          "lambda-alias": false,
+          "codedeploy-lambda": false
+        }
+      },
+      "limits": {
+        "max_duration_seconds": 900,
+        "max_payload_mb": 6
+      },
+      "unsupported_needs": [
+        "gpu",
+        "os",
+        "licence",
+        "websockets"
+      ],
+      "probe_alarms": []
     },
     "ecs-fargate": {
       "family": "ecs",
-      "strategies": ["all-at-once", "rolling", "canary", "linear", "blue-green"],
-      "engines": ["ecs-native", "codedeploy", "pipeline"],
+      "strategies": [
+        "all-at-once",
+        "rolling",
+        "canary",
+        "linear",
+        "blue-green"
+      ],
+      "engines": [
+        "ecs-native",
+        "codedeploy",
+        "pipeline"
+      ],
       "auto_engine": "ecs-native",
-      "engine_strategies": {"pipeline": ["rolling"]},
+      "engine_strategies": {
+        "pipeline": [
+          "rolling"
+        ]
+      },
       "gradual_needs_alb": true,
       "gitops": false,
       "fixed_monthly_usd": 0,
-      "two_versions_live": ["rolling", "canary", "linear", "blue-green"],
-      "env_flags": ["scale_to_zero", "fargate_spot"],
-      "alarms": ["5xx-rate", "p95-latency", "unhealthy-hosts", "probe-failures"],
+      "two_versions_live": [
+        "rolling",
+        "canary",
+        "linear",
+        "blue-green"
+      ],
+      "env_flags": [
+        "scale_to_zero",
+        "fargate_spot"
+      ],
+      "alarms": [
+        "5xx-rate",
+        "p95-latency",
+        "unhealthy-hosts",
+        "probe-failures"
+      ],
       "hints": {},
       "built": {
         "runtime": false,
-        "engines": {"ecs-native": false, "codedeploy": false, "pipeline": false},
-        "delivery": {"push": false, "gitops": false},
-        "profiles": {"ecs-native": false, "codedeploy-ecs": false, "ecs-service-update": false}
-      }
+        "engines": {
+          "ecs-native": false,
+          "codedeploy": false,
+          "pipeline": false
+        },
+        "delivery": {
+          "push": false,
+          "gitops": false
+        },
+        "profiles": {
+          "ecs-native": false,
+          "codedeploy-ecs": false,
+          "ecs-service-update": false
+        }
+      },
+      "limits": {},
+      "unsupported_needs": [],
+      "probe_alarms": [
+        "probe-failures"
+      ]
     },
     "ec2-asg": {
       "family": "ec2",
-      "strategies": ["rolling", "canary", "blue-green"],
-      "engines": ["asg", "codedeploy"],
+      "strategies": [
+        "rolling",
+        "canary",
+        "blue-green"
+      ],
+      "engines": [
+        "asg",
+        "codedeploy"
+      ],
       "auto_engine": "asg",
       "engine_strategies": {},
       "gradual_needs_alb": true,
       "gitops": false,
       "fixed_monthly_usd": 0,
-      "two_versions_live": ["rolling", "canary", "blue-green"],
-      "env_flags": ["scale_to_zero"],
-      "alarms": ["5xx-rate", "p95-latency", "unhealthy-hosts", "instance-status-check", "probe-failures"],
+      "two_versions_live": [
+        "rolling",
+        "canary",
+        "blue-green"
+      ],
+      "env_flags": [
+        "scale_to_zero"
+      ],
+      "alarms": [
+        "5xx-rate",
+        "p95-latency",
+        "unhealthy-hosts",
+        "instance-status-check",
+        "probe-failures"
+      ],
       "hints": {
         "all-at-once": "an ASG deploys by instance refresh; use rolling, canary or blue-green"
       },
       "built": {
         "runtime": false,
-        "engines": {"asg": false, "codedeploy": false},
-        "delivery": {"push": false, "gitops": false},
-        "profiles": {"asg-instance-refresh": false, "codedeploy-ec2": false}
-      }
+        "engines": {
+          "asg": false,
+          "codedeploy": false
+        },
+        "delivery": {
+          "push": false,
+          "gitops": false
+        },
+        "profiles": {
+          "asg-instance-refresh": false,
+          "codedeploy-ec2": false
+        }
+      },
+      "limits": {},
+      "unsupported_needs": [],
+      "probe_alarms": [
+        "probe-failures"
+      ]
     },
     "eks-workload": {
       "family": "eks",
-      "strategies": ["rolling", "canary", "blue-green"],
-      "engines": ["argo-rollouts"],
+      "strategies": [
+        "rolling",
+        "canary",
+        "blue-green"
+      ],
+      "engines": [
+        "argo-rollouts"
+      ],
       "auto_engine": "argo-rollouts",
       "engine_strategies": {},
       "gradual_needs_alb": false,
       "gitops": true,
       "fixed_monthly_usd": 73,
-      "two_versions_live": ["rolling", "canary", "blue-green"],
+      "two_versions_live": [
+        "rolling",
+        "canary",
+        "blue-green"
+      ],
       "env_flags": [],
-      "alarms": ["5xx-rate", "p95-latency", "pod-restarts", "probe-failures"],
+      "alarms": [
+        "5xx-rate",
+        "p95-latency",
+        "pod-restarts",
+        "probe-failures"
+      ],
       "hints": {
         "all-at-once": "Argo Rollouts releases gradually; use rolling, canary or blue-green"
       },
       "built": {
         "runtime": false,
-        "engines": {"argo-rollouts": false},
-        "delivery": {"push": false, "gitops": false},
-        "profiles": {"argo-rollouts": false}
-      }
+        "engines": {
+          "argo-rollouts": false
+        },
+        "delivery": {
+          "push": false,
+          "gitops": false
+        },
+        "profiles": {
+          "argo-rollouts": false
+        }
+      },
+      "limits": {},
+      "unsupported_needs": [],
+      "probe_alarms": [
+        "probe-failures"
+      ]
     }
   },
   "deploy_role_profiles": {

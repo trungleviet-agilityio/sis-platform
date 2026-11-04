@@ -6,12 +6,28 @@ read only this document. Adding a key is a minor change; renaming or removing on
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from sis_intake import rules
 
+_VERSION = re.compile(r"v[0-9]+\.[0-9]+\.[0-9]+")
 FORMAT_VERSION = 1
 ROLE_VERBS = ("plan", "apply", "deploy")
+
+
+def _version(platform: Any) -> str | None:
+    """`platform.version` only when it has the vX.Y.Z shape, so a bad value is never echoed."""
+    version = platform.get("version") if isinstance(platform, dict) else None
+    if isinstance(version, str) and _VERSION.fullmatch(version):
+        return version
+    return None
+
+
+def effective_p95(manifest: dict[str, Any], defaults: dict[str, Any]) -> int:
+    """The p95 target in effect: the manifest value, else the default (also the SLO value)."""
+    value = (manifest.get("workload") or {}).get("p95_ms", defaults["workload"]["p95_ms"])
+    return int(value)
 
 
 def _roles(prefix: str, env: str) -> dict[str, str]:
@@ -34,6 +50,12 @@ def _env_plan(
     retention = defaults["tiers"][view.tier]["log_retention_days"]
     if data_class == "regulated":
         retention = defaults["regulated_log_retention_days"]
+    alarms = [
+        alarm
+        for alarm in entry["alarms"]
+        # A nonprod env with no probes has nothing to feed a probe alarm.
+        if not (alarm in entry["probe_alarms"] and view.tier == "nonprod" and not view.probes)
+    ]
     return {
         "tier": view.tier,
         "account": view.env["account"],
@@ -54,9 +76,9 @@ def _env_plan(
         "observability": {
             "slo": {
                 "availability_pct": defaults["tiers"][view.tier]["availability_pct"],
-                "p95_ms": workload.get("p95_ms", defaults["workload"]["p95_ms"]),
+                "p95_ms": effective_p95(manifest, defaults),
             },
-            "alarms": [f"{prefix}-{view.name}-{alarm}" for alarm in entry["alarms"]],
+            "alarms": [f"{prefix}-{view.name}-{alarm}" for alarm in alarms],
             "log_retention_days": retention,
             "notify": f"{prefix}-{view.name}-notify",
         },
@@ -85,7 +107,7 @@ def build_plan(
     schema_version = raw.get("schema_version")
     plan: dict[str, Any] = {
         "format_version": FORMAT_VERSION,
-        "platform_version": platform.get("version") if isinstance(platform, dict) else None,
+        "platform_version": _version(platform),
         "schema_version": schema_version if isinstance(schema_version, int) else None,
         "context": context,
         "valid": not any(f.severity == "error" for f in findings),
@@ -116,12 +138,10 @@ def build_plan(
         "port": workload.get("port"),
         "health_path": rules.health_path(manifest, defaults),
         "peak_rps": workload.get("peak_rps"),
-        "p95_ms": workload.get("p95_ms"),
+        "p95_ms": effective_p95(manifest, defaults),
     }
-    plan["envs"] = {
-        view.name: _env_plan(view, manifest, compat, defaults)
-        for view in rules.env_views(manifest, compat, defaults)
-    }
+    views = sorted(rules.env_views(manifest, compat, defaults), key=lambda v: v.name)
+    plan["envs"] = {view.name: _env_plan(view, manifest, compat, defaults) for view in views}
     return plan
 
 

@@ -124,6 +124,31 @@ class SchemaFile(unittest.TestCase):
         self.assertEqual(len(schema.validate({}, sch)), 1)
         self.assertEqual(schema.check_schema_keywords(sch), [])
 
+    def test_property_names_is_in_the_subset(self) -> None:
+        sch = {"type": "object", "propertyNames": {"pattern": "^[a-z]+$"}}
+        self.assertEqual(schema.check_schema_keywords(sch), [])
+        self.assertEqual(schema.validate({"ab": 1}, sch), [])
+        issues = schema.validate({"ab": 1, "Bad": 2}, sch)
+        self.assertEqual([i.path for i in issues], ["Bad"])
+        bad = {"propertyNames": {"format": "uri"}}
+        self.assertEqual(len(schema.check_schema_keywords(bad)), 1)
+
+    def test_env_names_are_constrained(self) -> None:
+        for name, ok in (
+            ("dev", True),
+            ("prod-eu", True),
+            ("a" * 15, True),
+            ("a" * 16, False),
+            ("Prod", False),
+            ("1dev", False),
+            ("dev_1", False),
+        ):
+            with self.subTest(name=name):
+                m = copy_of(base_manifest())
+                m["envs"][name] = m["envs"].pop("dev")
+                m["envs"]["prod"]["promote_from"] = name
+                self.assertEqual(schema.validate(m, self.sch) == [], ok)
+
     def test_property_named_like_keyword_is_not_flagged(self) -> None:
         ok = {"properties": {"format": {"type": "string"}}}
         self.assertEqual(schema.check_schema_keywords(ok), [])

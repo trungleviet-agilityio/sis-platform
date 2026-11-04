@@ -42,7 +42,11 @@ class Report:
         resolvable: bool,
         parse_error: bool,
     ) -> None:
-        self.findings = findings
+        # No output ever carries an account-ID-like run, not even an echoed bad value.
+        self.findings = [
+            f._replace(path=rules.redact(f.path), message=rules.redact(f.message))
+            for f in findings
+        ]
         self.manifest = manifest
         self.context = context
         self.resolvable = resolvable
@@ -70,9 +74,8 @@ class Report:
     @property
     def plan(self) -> dict[str, Any]:
         if self._plan is None:
-            self._plan = plan.build_plan(
-                self.manifest, self.findings, self.context, self.resolvable
-            )
+            built = plan.build_plan(self.manifest, self.findings, self.context, self.resolvable)
+            self._plan = rules.redact_obj(built)
         return self._plan
 
     @property

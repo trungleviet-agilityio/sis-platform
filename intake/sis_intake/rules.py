@@ -16,10 +16,49 @@ Hit = tuple[str, str]  # (path, message)
 
 CONTEXTS = ("lint", "deploy")
 GRADUAL = ("canary", "linear")
-ENV_FLAGS = ("scale_to_zero", "fargate_spot")
 HEALTH_PLACEHOLDER = "<health_path>"
+SCHEMA_PATH = Path(__file__).resolve().parent.parent / "schema" / "platform.schema.json"
 
-_TWELVE_DIGITS = re.compile(r"(?<!\d)\d{12}(?!\d)")
+# A 12-digit run or the hyphenated 4-4-4 form. Hex-digit boundaries keep a digit run inside a longer
+# hex string (a commit SHA) from matching. The documentation example stays allowed.
+_ACCOUNT_LIKE = re.compile(
+    r"(?<![0-9A-Fa-f])\d{12}(?![0-9A-Fa-f])|(?<![0-9A-Za-z-])\d{4}-\d{4}-\d{4}(?![0-9A-Za-z-])"
+)
+_ALLOWED_ACCOUNT_LIKE = frozenset({"1234-5678-9012"})
+REDACTED = "<redacted>"
+
+
+def account_like(text: str) -> list[str]:
+    """Every account-ID-like run in the text (V10)."""
+    return [m for m in _ACCOUNT_LIKE.findall(text) if m not in _ALLOWED_ACCOUNT_LIKE]
+
+
+def redact(text: str) -> str:
+    """Replace account-ID-like runs, so no output ever carries one."""
+    return _ACCOUNT_LIKE.sub(
+        lambda m: m.group(0) if m.group(0) in _ALLOWED_ACCOUNT_LIKE else REDACTED, text
+    )
+
+
+def redact_obj(value: Any) -> Any:
+    """`redact` over every string, key and value, in a JSON-like structure."""
+    if isinstance(value, str):
+        return redact(value)
+    if isinstance(value, list):
+        return [redact_obj(v) for v in value]
+    if isinstance(value, dict):
+        return {redact(str(k)): redact_obj(v) for k, v in value.items()}
+    return value
+
+
+def env_flag_names(compat: dict[str, Any]) -> set[str]:
+    """Env boolean flags: the schema's boolean env properties plus every runtime's `env_flags`."""
+    with open(SCHEMA_PATH, encoding="utf-8") as handle:
+        props = json.load(handle)["$defs"]["env"]["properties"]
+    flags = {name for name, spec in props.items() if spec.get("type") == "boolean"}
+    for entry in compat["runtimes"].values():
+        flags.update(entry["env_flags"])
+    return flags
 
 
 class Finding(NamedTuple):
@@ -121,6 +160,10 @@ class Ctx:
     @property
     def health_path(self) -> str:
         return health_path(self.manifest, self.defaults)
+
+    @cached_property
+    def flags(self) -> set[str]:
+        return env_flag_names(self.compat)
 
     @property
     def budget(self) -> int | None:
@@ -366,29 +409,31 @@ def v07(ctx: Ctx, params: dict[str, Any]) -> list[Hit]:
 @rule("V08")
 def v08(ctx: Ctx, params: dict[str, Any]) -> list[Hit]:
     entry = ctx.entry
-    if entry is None or entry["family"] != "lambda":
+    if entry is None:
         return []
     work = ctx.manifest.get("workload") or {}
+    limits = entry["limits"]
     hits: list[Hit] = []
     duration = work.get("max_duration_seconds")
-    if isinstance(duration, int) and duration > params["max_duration_seconds"]:
+    limit = limits.get("max_duration_seconds")
+    if isinstance(duration, int) and limit is not None and duration > limit:
         hits.append(
-            (
-                "workload.max_duration_seconds",
-                f"Lambda stops at {params['max_duration_seconds']} s, got {duration}",
-            )
+            ("workload.max_duration_seconds", f"{ctx.kind} stops at {limit} s, got {duration}")
         )
     payload = work.get("max_payload_mb")
-    if isinstance(payload, int) and payload > params["max_payload_mb"]:
+    limit = limits.get("max_payload_mb")
+    if isinstance(payload, int) and limit is not None and payload > limit:
         hits.append(
             (
                 "workload.max_payload_mb",
-                f"Lambda synchronous payload limit is {params['max_payload_mb']} MB, got {payload}",
+                f"{ctx.kind} synchronous payload limit is {limit} MB, got {payload}",
             )
         )
-    needs = [n for n in (work.get("needs") or []) if n in params["needs"]]
+    needs = [n for n in (work.get("needs") or []) if n in entry["unsupported_needs"]]
     if needs:
-        hits.append(("workload.needs", "Lambda cannot provide: {}".format(", ".join(needs))))
+        hits.append(
+            ("workload.needs", "{} cannot provide: {}".format(ctx.kind, ", ".join(needs)))
+        )
     return hits
 
 
@@ -432,12 +477,10 @@ def v10(ctx: Ctx, params: dict[str, Any]) -> list[Hit]:
         return [
             (f"line {number}", message)
             for number, line in enumerate(ctx.raw_text.splitlines(), start=1)
-            if _TWELVE_DIGITS.search(line)
+            if account_like(line)
         ]
     return [
-        (path or "(root)", message)
-        for path, text in _walk(ctx.manifest, "")
-        if _TWELVE_DIGITS.search(text)
+        (path or "(root)", message) for path, text in _walk(ctx.manifest, "") if account_like(text)
     ]
 
 
@@ -540,7 +583,7 @@ def v16(ctx: Ctx, params: dict[str, Any]) -> list[Hit]:
     for e in ctx.envs:
         if e.tier != "prod":
             continue
-        for flag in ENV_FLAGS:
+        for flag in sorted(ctx.flags):
             if e.env.get(flag) is True:
                 hits.append((_p(e, flag), f"{flag} on prod risks availability"))
     return hits
@@ -585,13 +628,17 @@ def v18(ctx: Ctx, params: dict[str, Any]) -> list[Hit]:
 @rule("V19")
 def v19(ctx: Ctx, params: dict[str, Any]) -> list[Hit]:
     health = ctx.health_path
+
+    def norm(path: str) -> str:
+        return path.lower().rstrip("/") or "/"
+
     return [
         (
             _p(e, "release", "probes"),
             f"{e.strategy} needs release.probes with a path other than the health path {health}",
         )
         for e in ctx.envs
-        if e.strategy in GRADUAL and not any(p != health for p in e.probes)
+        if e.strategy in GRADUAL and not any(norm(p) != norm(health) for p in e.probes)
     ]
 
 
@@ -653,7 +700,7 @@ def v21(ctx: Ctx, params: dict[str, Any]) -> list[Hit]:
     return [
         (_p(e, flag), f"{flag} is not available on {e.kind} (allowed: {allowed})")
         for e in ctx.envs
-        for flag in ENV_FLAGS
+        for flag in sorted(ctx.flags)
         if e.env.get(flag) is True and flag not in entry["env_flags"]
         for allowed in [", ".join(entry["env_flags"]) or "none"]
     ]

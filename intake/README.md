@@ -112,7 +112,7 @@ The intake writes only what the loader reads. A test compares the loader with `y
 ## Schema keyword subset
 
 `sis_intake/schema.py` interprets: `type`, `enum`, `const`, `required`, `properties`, `additionalProperties`,
-`items`, `pattern`, `minimum`, `maximum`, `minItems`, and `$ref` to a local `#/$defs/<name>`. The annotation
+`minProperties`, `propertyNames`, `items`, `pattern`, `minimum`, `maximum`, `minItems`, and `$ref` to a local `#/$defs/<name>`. The annotation
 keywords `$schema`, `$id`, `$defs`, `title` and `description` are accepted. A test fails when the schema uses any
 other keyword. Every object in the schema sets `additionalProperties: false`.
 
@@ -134,7 +134,7 @@ Generated from `rules/rules.json`; do not edit by hand. Regenerate with
 | V05 | canary, linear or blue-green on a runtime that needs an ALB for gradual release (`ecs-fargate`, `ec2-asg`) need `front_door: alb` | E | REL | OPS06-BP03 |
 | V06 | ALB needed and `budget.monthly_usd` < 40 | W | COST | COST02-BP05 |
 | V07 | `blue-green` doubles capacity during a deploy | W | COST, SUS | SUS02-BP01 |
-| V08 | Lambda runtime with `max_duration_seconds` > 900, `max_payload_mb` > 6, or `needs` containing gpu, os, licence or websockets | E | PERF | PERF01-BP01, PERF02-BP01 |
+| V08 | A runtime limit from compat `limits` is exceeded (Lambda: `max_duration_seconds` > 900, `max_payload_mb` > 6) or `needs` contains something the runtime cannot provide (Lambda: gpu, os, licence, websockets) | E | PERF | PERF01-BP01, PERF02-BP01 |
 | V09 | `front_door: http-api` with `max_duration_seconds` > 29 | E | PERF, REL | PERF02-BP02 |
 | V10 | A 12-digit number anywhere in the manifest text, including comments and placeholders | E | SEC | SEC01-BP06 |
 | V11 | A `tier: prod` env needs `promote_from` (one artifact promoted by digest) | E | SEC, REL | SEC11-BP06, REL08-BP04 |
@@ -157,8 +157,18 @@ Generated from `rules/rules.json`; do not edit by hand. Regenerate with
 ## Intake plugin
 
 `sis-intake` (version 0.2.0) lives at the plugin root `intake/` and is listed in the repo marketplace. Its skill
-`intake` runs the interview one question at a time from `rules/questions.json`, validates the draft, sent on stdin, with
-`python3 "${CLAUDE_PLUGIN_ROOT}/sis_intake/validate.py" -` until there are 0 errors (no temp file; the agent's Bash
-is limited to that command), and returns three drafts as text: `platform.yaml`, a first ADR with a Well-Architected review table, and a pipeline proposal. The orchestrating
-session in the project repo writes them. The `intake-interviewer` agent never writes into the project repo and never
-runs AWS, Terraform or `gh` write commands.
+`intake` runs the interview one question at a time from `rules/questions.json` and returns three drafts as text:
+`platform.yaml`, a first ADR with a Well-Architected review table, and a pipeline proposal. The orchestrating session
+in the project repo writes them.
+
+Validation (ADR 0002 D14): the `intake-interviewer` agent has the tools Read, Grep and Glob only, no Bash, so it
+cannot run anything. It returns the draft manifest as text. The skill, run in the orchestrating session, pipes the
+draft to `python3 "${CLAUDE_PLUGIN_ROOT}/sis_intake/validate.py" -` on stdin (no temp file) and sends the findings
+back to the interviewer until there are 0 errors. The agent never writes into the project repo.
+
+## Output hygiene
+
+No output carries an account-ID-like run (12 digits, or the hyphenated 4-4-4 form; `1234-5678-9012` from the AWS
+docs is allowed). Finding messages, paths and plan values are redacted, and `platform_version` is null unless it
+matches `vX.Y.Z`. V10 still reports the number, by line. Digit runs inside a longer hex string (a commit SHA) are not
+reported.
