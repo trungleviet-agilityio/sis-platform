@@ -228,7 +228,7 @@ def _role_violations(resources: List[str], env_name: Optional[str]) -> List[str]
 
 
 def _is_star(resource: str) -> bool:
-    """`*`, or an ARN whose service or resource segment is a wildcard (`arn:*`, `arn:aws:s3:*:*:*`)."""
+    """`*`, or an ARN with a wildcard service or resource segment (`arn:*`, `arn:aws:s3:*:*:*`)."""
     if resource == "*":
         return True
     if not resource.startswith("arn:"):
