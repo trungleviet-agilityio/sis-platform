@@ -87,13 +87,45 @@ jobs:
       - name: Validate examples
         run: make validate-examples
 
+  # Offline Terraform checks for modules/ (ADR 0002 H9): fmt, validate, terraform test, tflint, README, policy.
+  # No credentials; the AWS provider is downloaded for init, so egress stays in audit.
+  tf-check:
+    name: tf-check
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
+        with:
+          egress-policy: audit
+
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.13"
+
+      - name: Install terraform, tflint and terraform-docs (checksum verified)
+        run: |
+          scripts/ci/install-tf-tools.sh "$RUNNER_TEMP/tf-bin"
+          echo "$RUNNER_TEMP/tf-bin" >> "$GITHUB_PATH"
+
+      - name: Terraform checks
+        run: bash scripts/tf/check.sh
+
   # The one status the ruleset requires. It fails when any needed job failed, was cancelled or was skipped.
   check:
     name: check
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     if: ${{ always() }}
-    needs: [lint, test]
+    needs: [lint, test, tf-check]
     permissions: {}
     steps:
       - name: Harden runner

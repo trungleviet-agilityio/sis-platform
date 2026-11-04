@@ -152,6 +152,39 @@ expect_closure_pass "a renamed script under its new name"
 rm -f "$closure_file"
 expect_closure_fail "closure file"
 
+log "repo mode refuses a missing or empty root"
+# expect_usage_error <root> <message fragment>: exit status 2 with the message
+expect_usage_error() {
+  local out rc=0
+  out="$(trap - ERR; "$py" -I "$guard" repo "$1" 2>&1)" || rc=$?
+  [ "$rc" -eq 2 ] || die "selftest: repo $1 should exit 2, got $rc"
+  case "$out" in *"$2"*) ;; *) die "selftest: repo $1 failed without '$2'. Got: $out" ;; esac
+}
+expect_usage_error "$tmp/does-not-exist" "is not a directory"
+mkdir -p "$tmp/empty-root"
+expect_usage_error "$tmp/empty-root" "nothing to check"
+
+log "install-tf-tools.sh versions match mise.toml"
+tools="$ROOT/scripts/ci/install-tf-tools.sh"
+# check_tool_versions <mise.toml> <message fragment or empty>: every tool pinned in both files has one version
+check_tool_versions() {
+  local out rc=0 name var
+  for pair in terraform:TERRAFORM tflint:TFLINT terraform-docs:TERRAFORM_DOCS; do
+    name="${pair%%:*}"
+    var="${pair##*:}_VERSION"
+    want="$(sed -n "s/^${name} = \"\(.*\)\"\$/\1/p" "$1")"
+    [ -n "$want" ] || continue # not pinned in this mise.toml yet
+    have="$(sed -n "s/^${var}=\"\(.*\)\"\$/\1/p" "$tools")"
+    [ "$want" = "$have" ] || { echo "install-tf-tools.sh ${var} ${have} differs from mise.toml ${name} ${want}"; rc=1; }
+  done
+  return "$rc"
+}
+check_tool_versions "$ROOT/mise.toml" >/dev/null || die "selftest: install-tf-tools.sh versions drifted from mise.toml"
+printf '[tools]\nterraform = "0.0.1"\n' >"$tmp/mise.toml"
+out="$(check_tool_versions "$tmp/mise.toml" || true)"
+case "$out" in *"TERRAFORM_VERSION"*"differs from mise.toml terraform 0.0.1"*) ;; *) die "selftest: drift check did not report. Got: $out" ;; esac
+grep -Eq '^[A-Z_]+_SHA256="[0-9a-f]{64}"$' "$tools" || die "selftest: install-tf-tools.sh holds no 64-hex SHA-256 values"
+
 log "no-aws-account-id hook pattern"
 "$py" -I - "$ROOT/.pre-commit-config.yaml" <<'PY' || die "selftest: the no-aws-account-id pattern misbehaves"
 import re

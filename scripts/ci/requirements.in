@@ -1,13 +1,11 @@
-# CI-only Python tools. Hash-locked with:
-#   uv pip compile --generate-hashes --universal --python-version 3.13 -o scripts/ci/requirements.txt scripts/ci/requirements.in
+# CI-only Python tools. Hash-locked with a 7-day release cooldown (a package younger than 7 days falls back to
+# an older release; bump the date to 7 days before the day you recompile):
+#   uv pip compile --generate-hashes --universal --python-version 3.13 --exclude-newer 2026-10-28 -o scripts/ci/requirements.txt scripts/ci/requirements.in
 # These run on the dev and CI Python (3.13); the intake runtime floor (3.9) is tested with stdlib only.
 # The pre-commit version matches mise.toml. PyYAML backs the YAML conformance test and the repo guard.
 pre-commit==4.7.0
 PyYAML==6.0.3
-# mypy runs from this venv (a local pre-commit hook), so its stub package can be hash-locked. pre-commit
-# additional_dependencies cannot carry hashes. types-PyYAML 6.0.12.20260906 is the newest release older than 7 days
-# (20261030 and 20261103 are too new); mypy 2.4.1 matches the version the previous hook used.
-mypy==2.4.1
+# mypy runs from this venv (a local pre-commit hook), so its stub package can be hash-locked: pre-commit
+# additional_dependencies cannot carry hashes. mypy 2.4.1 (2026-10-28) falls inside the cooldown, so 2.4.0 is pinned.
+mypy==2.4.0
 types-PyYAML==6.0.12.20260906
-# Held back: mypy-extensions 1.2.0 was released on 2026-11-03 (inside the 7-day cooldown).
-mypy-extensions==1.1.0

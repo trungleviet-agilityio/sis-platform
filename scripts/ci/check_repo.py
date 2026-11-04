@@ -109,6 +109,19 @@ def load_yaml(text: str) -> Any:
         loader.dispose()
 
 
+def parse_yaml(path: str) -> tuple[str, Any, list[str]]:
+    """Read and parse one YAML file: (text, document, problems). Problems is empty on success."""
+    import yaml
+
+    text = read(path)
+    if text is None:
+        return "", None, [f"{path}: cannot read"]
+    try:
+        return text, load_yaml(text), []
+    except yaml.YAMLError as exc:
+        return text, None, [f"{path}: invalid YAML ({exc})"]
+
+
 def collect_uses(node: Any) -> list[str]:
     """Every string value under a `uses` key anywhere in the parsed document."""
     found: list[str] = []
@@ -385,15 +398,9 @@ def reusable_problems(path: str, text: str, doc: Any) -> list[str]:
 
 
 def check_workflow(path: str) -> list[str]:
-    import yaml
-
-    text = read(path)
-    if text is None:
-        return [f"{path}: cannot read"]
-    try:
-        doc = load_yaml(text)
-    except yaml.YAMLError as exc:
-        return [f"{path}: invalid YAML ({exc})"]
+    text, doc, problems = parse_yaml(path)
+    if problems:
+        return problems
     if not isinstance(doc, dict):
         return [f"{path}: not a workflow mapping"]
     base = os.path.basename(path)
@@ -456,16 +463,8 @@ def check_workflow(path: str) -> list[str]:
 
 def check_uses_only(path: str) -> list[str]:
     """Other YAML under .github (composite actions, dependabot): only the `uses:` pin rule (H1)."""
-    import yaml
-
-    text = read(path)
-    if text is None:
-        return [f"{path}: cannot read"]
-    try:
-        doc = load_yaml(text)
-    except yaml.YAMLError as exc:
-        return [f"{path}: invalid YAML ({exc})"]
-    return check_uses(path, text, doc)
+    text, doc, problems = parse_yaml(path)
+    return problems or check_uses(path, text, doc)
 
 
 def check_makefile(path: str) -> list[str]:
@@ -629,7 +628,18 @@ def main(argv: list[str]) -> int:
         for path in args[4:]:
             problems += check_closure(path, args[1], args[3])
     elif mode == "repo":
-        problems = check_repo(args[0] if args else ".")
+        root = args[0] if args else "."
+        if not os.path.isdir(root):
+            print(f"{root}: is not a directory", file=sys.stderr)
+            return 2
+        if not any(
+            os.path.exists(os.path.join(root, name)) for name in (".github", "Makefile", "examples")
+        ):
+            print(
+                f"{root}: no .github, examples or Makefile found, nothing to check", file=sys.stderr
+            )
+            return 2
+        problems = check_repo(root)
     else:
         if not args:
             print(__doc__, file=sys.stderr)
