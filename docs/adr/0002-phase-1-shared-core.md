@@ -570,9 +570,9 @@ Stays (C) until the checkpoint, in addition to the list above: the size of the g
 6144-character limit, the `sha_pinning_required` field in the Actions permissions API, Administration read for
 rulesets, and the event refusal of AA3 in a live run.
 
-## Amendment B (2026-11-04, proposed): decisions from the wave 2 build and verify
+## Amendment B (2026-11-04, accepted): decisions from the wave 2 build and verify
 
-- Status: proposed (owner to accept with the wave 2 PRs)
+- Status: accepted (owner, 2026-11-04)
 - Source: peer reviews of 1h and 1f-1, and the wave 2 verify (e2e release simulation, security review).
 
 | # | Decision | Amends | Pillars |
@@ -599,3 +599,4 @@ on the immutable tag ruleset.
 | 2026-11-04 | Revised after challenger review C1 to C27: every trusted SHA checked remotely (L3); both environments gated, public canary (F30); claims smoke before any account (O12); trust moves batched (L7); fail-closed sparse closure (L2, O11); plan role denies and prod plan from `main` (T4, O14); escalation lint and boundary (T11); one full policy linter (T8); promotion deferred (T6); environment secret mechanism documented with a fallback (O13, F29); detective baseline (T7); ECR lifecycle (T5); separate board token (B16) and a before-build checkpoint; parallel sub-PR waves; WA findings added (M10, D18 to D21, H10, B14) or recorded with their phase |
 | 2026-11-04 | Amendment A: decisions from the wave 1 build and verify (accepted by the owner) |
 | 2026-11-04 | Amendment B (proposed): decisions from the wave 2 build and verify |
+| 2026-11-04 | Amendment B accepted by the owner |
