@@ -1,0 +1,26 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/trungleviet-agilityio/sis-platform/v0.2.0/intake/schema/platform.schema.json
+# Example consumer manifest: one Lambda web service with a nonprod dev env and a prod env.
+schema_version: 1
+project: {name: example-app, prefix: exa, owner: example-team}
+platform: {version: v0.2.0}
+workload: {shape: web, port: 8080, health_path: /health, max_duration_seconds: 10, max_payload_mb: 1, peak_rps: 50, p95_ms: 500}
+runtime: {kind: lambda-web, arch: arm64, front_door: http-api}
+ci: {provider: github-actions}
+budget: {monthly_usd: 20}
+dr: {strategy: backup-restore, rto_minutes: 240, rpo_minutes: 1440}
+compliance: {data_class: internal}
+database: {kind: none}
+envs:
+  dev:
+    tier: nonprod
+    account: dev
+    region: ap-southeast-1
+    delivery: push
+    scale_to_zero: true
+  prod:
+    tier: prod
+    account: prod
+    region: ap-southeast-1
+    delivery: push
+    promote_from: dev
+    release: {strategy: all-at-once, rollback: manual, engine: auto}

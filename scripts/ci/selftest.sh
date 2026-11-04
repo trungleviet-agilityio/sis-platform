@@ -100,7 +100,9 @@ repo="$tmp/repo"
 wf="$repo/.github/workflows/reusable-x.yml"
 closure_file="$repo/scripts/release/closure.txt"
 mkdir -p "$repo/scripts/release" "$repo/scripts/platform" "$repo/scripts/tf" "$repo/.github/workflows"
-printf ':(glob)scripts/release/closure.txt\n:(glob)scripts/platform/**\n:(glob)scripts/lib.sh\n' >"$closure_file"
+printf ':(glob)scripts/release/closure.txt\n:(glob)scripts/platform/**\n:(exclude,glob)scripts/platform/version.py\n:(glob)scripts/lib.sh\n' >"$closure_file"
+printf '__version__ = "1"\n' >"$repo/scripts/platform/version.py"
+printf '#!/usr/bin/env bash\nsource "$(dirname "$0")/version.py"\n' >"$repo/scripts/platform/sources-excluded.sh"
 printf '# lib\n' >"$repo/scripts/lib.sh"
 printf '#!/usr/bin/env bash\nsource "$(dirname "$0")/../lib.sh"\n' >"$repo/scripts/platform/ok.sh"
 printf '#!/usr/bin/env bash\nsource "$ROOT/scripts/tf/helper.sh"\n' >"$repo/scripts/platform/sourcing.sh"
@@ -149,6 +151,10 @@ uses_script scripts/platform/ok.sh
 expect_closure_fail ".platform/scripts/platform/ok.sh is not a tracked file"
 uses_script scripts/platform/renamed.sh
 expect_closure_pass "a renamed script under its new name"
+uses_script scripts/platform/version.py
+expect_closure_fail ".platform/scripts/platform/version.py is not covered by"
+uses_script scripts/platform/sources-excluded.sh
+expect_closure_fail "sources scripts/platform/version.py, which is not covered by"
 rm -f "$closure_file"
 expect_closure_fail "closure file"
 

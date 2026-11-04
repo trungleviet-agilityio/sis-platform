@@ -36,6 +36,8 @@ test: require-intake ## Intake and sis-team unit tests (stdlib unittest, 3.9 and
 	$(PYTHON) -m unittest discover -s plugins/sis-team/scripts -p 'test_*.py'
 	@if command -v $(VENV_PYTHON) >/dev/null 2>&1; then $(VENV_PYTHON) -m unittest discover -s plugins/sis-team/scripts -p 'test_*.py'; fi
 	$(PYTHON) -m unittest discover -s adapters/tests
+	$(PYTHON) -m unittest discover -s scripts/release/tests
+	$(PYTHON) scripts/platform/check_lock.py examples/consumer --platform-checkout
 
 validate-examples: require-intake ## Every valid example exits 0, every invalid one exits non-zero
 	@scripts/ci/validate-examples.sh

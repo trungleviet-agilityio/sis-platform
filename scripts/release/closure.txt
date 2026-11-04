@@ -1,0 +1,36 @@
+# The workflow closure (ADR 0002 L2, AA4): every file whose change moves workflow_sha.
+#   workflow_sha = git log -1 --format=%H <release_sha> -- <these pathspecs>
+# One git pathspec per line, all `:(glob)`. Lines starting with # are comments.
+#
+# Rules for editing this file (it is itself in the closure, so any edit moves workflow_sha):
+#   - list exact runtime files where a directory also holds tests or fixtures (AA4: scripts/tf; check.sh is a
+#     module-dev check that calls tests outside the closure, so workflows run policy.py and
+#     resolved-sources.sh directly);
+#   - a script a reusable workflow runs or sources must be covered. CI enforces this with
+#     scripts/ci/check_repo.py (H6); that script is a CI check and is not itself in the closure;
+#   - only `:(glob)` and `:(exclude,glob)` pathspecs are accepted (closure.py refuses other magic);
+#   - the README rule table and intake tests stay outside, so they never move trust (L7).
+# Phase 2 adds `:(glob)adapters/**` together with the first adapter (K).
+
+# This file
+:(glob)scripts/release/closure.txt
+
+# Reusable workflows
+:(glob).github/workflows/reusable-*.yml
+
+# Scripts the workflows run or source
+:(glob)scripts/platform/**
+:(glob)scripts/aws/**
+:(glob)scripts/lib.sh
+:(glob)scripts/tf/policy.py
+:(glob)scripts/tf/resolved-sources.sh
+
+# Validator runtime: code, schema and the three rule data files (not questions.json, tests or the README)
+:(glob)intake/sis_intake/**
+# The version file is the one file every release edits (L4), so it stays out. It may hold only a
+# docstring and the __version__ assignment; a test (test_closure.py) enforces that with ast.
+:(exclude,glob)intake/sis_intake/__init__.py
+:(glob)intake/schema/**
+:(glob)intake/rules/compat.json
+:(glob)intake/rules/defaults.json
+:(glob)intake/rules/rules.json
