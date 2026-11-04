@@ -20,9 +20,10 @@
 # shellcheck source=scripts/lib.sh
 source "$(dirname "$0")/../lib.sh"
 
-[ $# -eq 1 ] && { [ "$1" = "sources" ] || [ "$1" = "backend" ]; } ||
+mode="${1:-}"
+if [ $# -ne 1 ] || { [ "$mode" != "sources" ] && [ "$mode" != "backend" ]; }; then
   die "usage: scripts/platform/tf-init.sh sources|backend (see the header for the environment)"
-mode="$1"
+fi
 env_name="${ENV_NAME:-}" release_sha="${RELEASE_SHA:-}"
 [[ "$env_name" =~ ^[a-z][a-z0-9]{1,7}$ ]] || die "ENV_NAME must match ^[a-z][a-z0-9]{1,7}\$ (ADR 0002 AA1)"
 [[ "$release_sha" =~ ^[0-9a-f]{40}$ ]] || die "RELEASE_SHA must be the 40-hex platform.lock release_sha"

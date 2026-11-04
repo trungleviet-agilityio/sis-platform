@@ -16,8 +16,9 @@ label="$1"
 shift
 [[ "$label" =~ ^[a-z][a-z0-9-]{0,30}$ ]] || die "label must be lowercase letters, digits and hyphens"
 cfg="${TF_CLI_CONFIG_FILE:-}"
-[ -n "$cfg" ] && [ -f "$cfg" ] && grep -q '^provider_installation' "$cfg" ||
+if [ -z "$cfg" ] || [ ! -f "$cfg" ] || ! grep -q '^provider_installation' "$cfg"; then
   die "TF_CLI_CONFIG_FILE must name the platform CLI config (scripts/platform/terraformrc)"
+fi
 require_cmd terraform "run scripts/platform/install-terraform.sh"
 
 log_dir="${RUNNER_TEMP:-${TMPDIR:-/tmp}}"
