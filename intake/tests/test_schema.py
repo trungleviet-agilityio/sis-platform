@@ -136,9 +136,12 @@ class SchemaFile(unittest.TestCase):
     def test_env_names_are_constrained(self) -> None:
         for name, ok in (
             ("dev", True),
-            ("prod-eu", True),
-            ("a" * 15, True),
-            ("a" * 16, False),
+            ("prod-eu", False),
+            ("pre-prod", False),
+            ("a", False),
+            ("ab", True),
+            ("a" * 8, True),
+            ("a" * 9, False),
             ("Prod", False),
             ("1dev", False),
             ("dev_1", False),

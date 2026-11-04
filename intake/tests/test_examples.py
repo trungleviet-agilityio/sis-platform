@@ -21,6 +21,8 @@ SCHEMA_FILES = {
     "unknown-key.yaml",
     "env-name-uppercase.yaml",
     "env-name-too-long.yaml",
+    "env-name-hyphen.yaml",
+    "env-name-one-char.yaml",
 }
 
 

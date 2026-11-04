@@ -166,6 +166,15 @@ cannot run anything. It returns the draft manifest as text. The skill, run in th
 draft to `python3 "${CLAUDE_PLUGIN_ROOT}/sis_intake/validate.py" -` on stdin (no temp file) and sends the findings
 back to the interviewer until there are 0 errors. The agent never writes into the project repo.
 
+## Limits
+
+- Env names match `^[a-z][a-z0-9]{1,7}$` (2 to 8 characters, no hyphen). They feed IAM role names, alarm and topic
+  names, the Terraform module's env input (2 to 8 characters) and the GitHub secret `AWS_ACCOUNT_ID_<ENV>`, which
+  cannot contain a hyphen.
+- Input is capped at 1 MB (file or stdin). Over it, the validator reports a `PARSE` finding and exits 2 (JSON with
+  `--json`).
+- Plain text output shows the resolved plan and runtime defaults only for a manifest with no errors.
+
 ## Output hygiene
 
 No output carries an account-ID-like run (12 digits, or the hyphenated 4-4-4 form; `1234-5678-9012` from the AWS

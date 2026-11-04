@@ -27,6 +27,7 @@ if _PARENT not in sys.path:
 from sis_intake import plan, rules, schema, yamlsubset  # noqa: E402
 
 SCHEMA_PATH = Path(__file__).resolve().parent.parent / "schema" / "platform.schema.json"
+MAX_INPUT_BYTES = 1024 * 1024
 USAGE = (
     "usage: validate.py FILE|- [--json] [--context lint|deploy]\n"
     "       validate.py FILE|- --emit tfvars --env ENV\n"
@@ -126,7 +127,7 @@ def _render_text(report: Report) -> str:
         refs = ", ".join(f.pillars + f.wa_refs)
         suffix = f" [{refs}]" if refs else ""
         out.append(f"{f.severity:<7} {f.id:<6} {f.path}: {f.message}{suffix}")
-    if report.resolvable and report.manifest is not None:
+    if report.resolvable and report.manifest is not None and report.valid:
         out.append("")
         out.append("resolved:")
         for name, info in rules.resolve_envs(report.manifest).items():
@@ -200,11 +201,19 @@ def _parse_args(args: list[str]) -> tuple[Options | None, str]:
     return Options(positional[0], as_json, context, emit, env), ""
 
 
+class TooLargeError(Exception):
+    """The input is over MAX_INPUT_BYTES."""
+
+
 def _read(source: str) -> str:
     if source == "-":
-        return sys.stdin.read()
-    with open(source, encoding="utf-8") as handle:
-        return handle.read()
+        data = sys.stdin.buffer.read(MAX_INPUT_BYTES + 1)
+    else:
+        with open(source, "rb") as handle:
+            data = handle.read(MAX_INPUT_BYTES + 1)
+    if len(data) > MAX_INPUT_BYTES:
+        raise TooLargeError
+    return data.decode("utf-8")
 
 
 def _fail(report: Report, as_json: bool, usage: str = "") -> int:
@@ -230,6 +239,9 @@ def main(argv: list[str] | None = None) -> int:
         return _fail(
             report, options.as_json, f"cannot read {options.source}: {exc.strerror or exc}\n"
         )
+    except TooLargeError:
+        message = f"cannot read {options.source}: input is over {MAX_INPUT_BYTES} bytes"
+        return _fail(parse_failure("(input)", message), options.as_json, message + "\n")
     except UnicodeDecodeError:
         report = parse_failure("(input)", f"cannot read {options.source}: not UTF-8 text")
         return _fail(report, options.as_json, f"cannot read {options.source}: not UTF-8 text\n")

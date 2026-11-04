@@ -210,6 +210,35 @@ class Cli(unittest.TestCase):
         self.assertNotIn("demo-dev-probe-failures", alarms)
         self.assertIn("demo-dev-5xx-rate", alarms)
 
+    def test_text_with_errors_prints_findings_only(self) -> None:
+        proc = run_script(str(EXAMPLES / "invalid" / "canary-no-alarm.yaml"))
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("V01", proc.stdout)
+        self.assertNotIn("resolved:", proc.stdout)
+        self.assertNotIn("runtime defaults:", proc.stdout)
+        ok = run_script(str(EXAMPLES / "valid" / "minimal.yaml"))
+        self.assertIn("resolved:", ok.stdout)
+        self.assertIn("runtime defaults:", ok.stdout)
+
+    def test_input_over_one_megabyte_is_a_parse_error(self) -> None:
+        big = "# " + "x" * (1024 * 1024) + "\n"
+        for args in (("-", "--json"), ("-",)):
+            with self.subTest(args=args):
+                proc = run_script(*args, stdin=big)
+                self.assertEqual(proc.returncode, 2)
+                self.assertIn("1048576", proc.stdout + proc.stderr)
+        self.assertEqual(finding_ids(run_script("-", "--json", stdin=big)), ["PARSE"])
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "big.yaml"
+            path.write_text(big, "utf-8")
+            proc = run_script(str(path), "--json")
+        self.assertEqual(proc.returncode, 2)
+        self.assertEqual(finding_ids(proc), ["PARSE"])
+        text = (EXAMPLES / "valid" / "minimal.yaml").read_text("utf-8")
+        edge = text + "# " + "x" * (1024 * 1024 - len(text) - 3) + "\n"
+        self.assertEqual(len(edge.encode()), 1024 * 1024)
+        self.assertEqual(run_script("-", stdin=edge).returncode, 0)
+
     def test_json_for_a_schema_invalid_manifest_keeps_the_shape(self) -> None:
         proc = run_script(str(EXAMPLES / "invalid" / "unknown-key.yaml"), "--json")
         self.assertEqual(proc.returncode, 1)

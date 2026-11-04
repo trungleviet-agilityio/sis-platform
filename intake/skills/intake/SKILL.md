@@ -32,7 +32,7 @@ Two roles:
   only command the orchestrating session runs for this skill is the validator below, with the draft on stdin.
 - The manifest uses a YAML subset: block maps and lists, plain or quoted scalars, int, bool, null, comments, one-line
   flow lists and flow maps. No anchors, aliases, tags, multi-line scalars or nested flow maps. Quote strings that look
-  like numbers, dates or yes/no. Env names are lowercase, start with a letter, and have at most 15 characters.
+  like numbers, dates or yes/no. Env names are 2 to 8 characters: a lowercase letter, then lowercase letters or digits (no hyphen).
 
 ## Procedure
 
