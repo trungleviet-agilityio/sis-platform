@@ -545,9 +545,35 @@ Merge order: 1a, 1b, 1c, 1e, 1g, 1f-3, 1d, 1f-1, 1f-2.
 | Tests first | Self-test with recorded JSON |
 | Done | bash 3.2 compatible; no write verb |
 
+## Amendment A (2026-11-04, proposed): decisions from the wave 1 build and verify
+
+- Status: proposed (owner to accept with the wave 1 PRs)
+- Source: peer reviews of 1a, 1b, 1c, 1e, 1g and 1f-3, and the wave 1 verify (e2e, reviewer, security-reviewer,
+  code-simplifier) on the integration branch.
+
+| # | Decision | Amends | Pillars |
+|---|---|---|---|
+| AA1 | One env name rule everywhere: `^[a-z][a-z0-9]{1,7}$` (2 to 8 chars, no hyphen). It holds for intake `envs` keys, `var.env` in `account-bootstrap`, the adapter result `env` and `release_id`, and the repo secret `AWS_ACCOUNT_ID_<ENV>` (GitHub secret names cannot hold a hyphen) | M6, K3, O13 | OPS, REL |
+| AA2 | The git PAT that Claude's shell uses has no Deployments write, Actions write or Administration write, so it can never approve an environment deployment or change settings. A12 needs Secrets read and Variables read to list names (C at step 10) | B16, checkpoint 0 | SEC |
+| AA3 | AWS has no `event_name` condition key (V). The Phase 2 reusable apply and release workflows refuse any event other than `push` and `workflow_dispatch` in their first step; H rules check it | W, O9 | SEC |
+| AA4 | `closure.txt` lists exact runtime files for `scripts/tf` (`policy.py`, `check.sh`, `resolved-sources.sh`), not `scripts/tf/**`, so tests and fixtures never move `workflow_sha` | L2, L7 | OPS |
+| AA5 | Plan role: AWS managed ReadOnlyAccess plus explicit denies (secrets, SSM decryption, KMS decrypt, S3 outside state, and the non-read or data-plane actions ReadOnlyAccess grants, such as `sqs:Receive*`, `s3express:CreateSession`, DynamoDB item reads, log event reads). No service-wildcard `NotAction` (IAM grammar documents wildcards in action names only) | T4 | SEC |
+| AA6 | Escalation rules are enforced twice: by `policy.py` (P06, P07, P09, P10, P11) and by guardrail denies in IAM (role writes without the boundary, boundary deletion, PassRole without `iam:PassedToService`). At checkpoint step 6 the owner also runs `policy.py` on `terraform show -json` of the bootstrap plan before apply | T8, T11, checkpoint 6 | SEC |
+| AA7 | CI runs `tf-check` in its own job with terraform, tflint and terraform-docs installed by checksum; `check` needs it | H9 | OPS |
+| AA8 | Claude guard: path-scoped writes and `rm -r` allow the git toplevel and Claude's own scratch dir `/tmp/claude-<uid>` (real directory, owned by the user, not group or world writable); shells fed by stdin, here-strings or process substitution are checked or blocked; release tags and `gh release` writes are blocked. Accepted limits of a text guard: interpreters other than shells and python (`perl -e`), commands built from variables, git aliases via `-c`, scripts written then run, `.git/hooks`. Backstops: no AWS credentials in the shell, the `main` ruleset, and AA2 | S2, A14 | SEC |
+| AA9 | The intake interviewer agent has no Bash; the intake skill in the orchestrating session runs the validator on the draft (D14 implementation) | D14 | SEC |
+| AA10 | Adapter contract additions marked "(1g addition)" in `adapters/CONTRACT.md` are accepted: rollback inputs (`SIS_PREV_DIGEST` is the target that becomes live), `contract_check.py` as the shared cross-field checker for K7, refs as `""` when empty | K | OPS, REL |
+| AA11 | A checkout of sis-platform in a non-reusable workflow is not checked by H5; accepted, because roles are only reachable through the pinned reusable workflows | H5 | SEC |
+| AA12 | Deferred to the first PR of wave 2: ruff and mypy scope widened to `plugins/**`, `adapters/**` and all of `scripts/**` | H9 | OPS |
+
+Stays (C) until the checkpoint, in addition to the list above: the size of the guardrail managed policies against the
+6144-character limit, the `sha_pinning_required` field in the Actions permissions API, Administration read for
+rulesets, and the event refusal of AA3 in a live run.
+
 ## Change log
 
 | Date | Change |
 |---|---|
 | 2026-11-04 | Drafted |
 | 2026-11-04 | Revised after challenger review C1 to C27: every trusted SHA checked remotely (L3); both environments gated, public canary (F30); claims smoke before any account (O12); trust moves batched (L7); fail-closed sparse closure (L2, O11); plan role denies and prod plan from `main` (T4, O14); escalation lint and boundary (T11); one full policy linter (T8); promotion deferred (T6); environment secret mechanism documented with a fallback (O13, F29); detective baseline (T7); ECR lifecycle (T5); separate board token (B16) and a before-build checkpoint; parallel sub-PR waves; WA findings added (M10, D18 to D21, H10, B14) or recorded with their phase |
+| 2026-11-04 | Amendment A (proposed): decisions from the wave 1 build and verify |
