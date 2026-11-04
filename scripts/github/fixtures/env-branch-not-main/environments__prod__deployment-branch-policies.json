@@ -1,0 +1,10 @@
+{
+  "branch_policies": [
+    {
+      "id": 0,
+      "name": "release",
+      "type": "branch"
+    }
+  ],
+  "total_count": 1
+}

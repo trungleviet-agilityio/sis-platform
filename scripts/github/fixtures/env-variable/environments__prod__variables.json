@@ -1,0 +1,9 @@
+{
+  "total_count": 1,
+  "variables": [
+    {
+      "name": "AWS_REGION",
+      "value": "x"
+    }
+  ]
+}
