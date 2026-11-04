@@ -30,8 +30,10 @@ lint: .venv-ci/.installed ## pre-commit hooks on all files, shellcheck, actionli
 	scripts/ci/selftest.sh
 	$(if $(wildcard .github/workflows/*.yml),actionlint,@echo "no workflows yet, skipping actionlint")
 
-test: require-intake ## Intake unit tests (stdlib unittest)
+test: require-intake ## Intake and sis-team unit tests (stdlib unittest, 3.9 and 3.13)
 	$(PYTHON) -m unittest discover -s intake/tests -t intake
+	$(PYTHON) -m unittest discover -s plugins/sis-team/scripts -p 'test_*.py'
+	@if command -v $(VENV_PYTHON) >/dev/null 2>&1; then $(VENV_PYTHON) -m unittest discover -s plugins/sis-team/scripts -p 'test_*.py'; fi
 
 validate-examples: require-intake ## Every valid example exits 0, every invalid one exits non-zero
 	@scripts/ci/validate-examples.sh
