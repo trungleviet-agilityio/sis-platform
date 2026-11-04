@@ -12,7 +12,9 @@ from .helpers import EXAMPLES
 
 EXPECT = re.compile(r"^# expect: (\S+)\s*$")
 
-ERROR_RULES = {"V01", "V02", "V03", "V04", "V05", "V08", "V09", "V10", "V11", "V12"}
+ERROR_RULES = {f"V{n:02d}" for n in (1, 2, 3, 4, 5, 8, 9, 10, 11, 12, *range(19, 26))}
+V20_FILES = {"promote-unknown.yaml", "promote-cycle.yaml", "shared-account.yaml"}
+SCHEMA_FILES = {"no-budget.yaml", "no-owner.yaml", "no-tier.yaml", "unknown-key.yaml"}
 
 
 def expected_id(path: Path) -> str:
@@ -43,8 +45,8 @@ class Valid(unittest.TestCase):
 
     def test_ship_it_serverless_resolution(self) -> None:
         report = validate.validate_file(str(EXAMPLES / "valid" / "ship-it-serverless.yaml"))
-        self.assertEqual(report.resolved["dev"]["engine"], "pipeline")
-        self.assertEqual(report.resolved["dev"]["deploy_role_profile"], "lambda-alias")
+        self.assertEqual(report.envs["dev"]["engine"], "pipeline")
+        self.assertEqual(report.envs["dev"]["deploy_role_profile"], "lambda-alias")
 
 
 class Invalid(unittest.TestCase):
@@ -60,6 +62,14 @@ class Invalid(unittest.TestCase):
                 self.assertEqual(errors, [want])
         self.assertTrue(seen >= ERROR_RULES, f"missing: {sorted(ERROR_RULES - seen)}")
         self.assertTrue({"SCHEMA", "PARSE"} <= seen)
+        names = {p.name: expected_id(p) for p in files}
+        self.assertEqual(V20_FILES, {n for n in V20_FILES if names.get(n) == "V20"})
+        self.assertEqual(SCHEMA_FILES, {n for n in SCHEMA_FILES if names.get(n) == "SCHEMA"})
+        self.assertEqual(names["canary-no-probes.yaml"], "V19")
+
+    def test_ship_it_serverless_dev_canary_has_probes(self) -> None:
+        report = validate.validate_file(str(EXAMPLES / "valid" / "ship-it-serverless.yaml"))
+        self.assertEqual(report.envs["dev"]["probes"], ["/health", "/version"])
 
     def test_account_id_only_in_v10_example(self) -> None:
         pattern = re.compile(r"(?<!\d)\d{12}(?!\d)")

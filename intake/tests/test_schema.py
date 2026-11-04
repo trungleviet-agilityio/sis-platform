@@ -118,6 +118,12 @@ class SchemaFile(unittest.TestCase):
         self.assertEqual(len(problems), 1)
         self.assertIn("format", problems[0])
 
+    def test_min_properties_is_in_the_subset(self) -> None:
+        sch = {"type": "object", "minProperties": 1}
+        self.assertEqual(schema.validate({"a": 1}, sch), [])
+        self.assertEqual(len(schema.validate({}, sch)), 1)
+        self.assertEqual(schema.check_schema_keywords(sch), [])
+
     def test_property_named_like_keyword_is_not_flagged(self) -> None:
         ok = {"properties": {"format": {"type": "string"}}}
         self.assertEqual(schema.check_schema_keywords(ok), [])
@@ -156,11 +162,70 @@ class SchemaFile(unittest.TestCase):
                 self.assertEqual(len(schema.validate(m, self.sch)), 1)
 
     def test_required_top_level(self) -> None:
-        for key in ("schema_version", "project", "platform", "runtime", "envs"):
+        for key in ("schema_version", "project", "platform", "runtime", "budget", "envs"):
             with self.subTest(key=key):
                 m = copy_of(base_manifest())
                 del m[key]
                 self.assertEqual(len(schema.validate(m, self.sch)), 1)
+
+    def test_owner_budget_tier_are_required(self) -> None:
+        for where, key in (
+            (["project"], "owner"),
+            (["budget"], "monthly_usd"),
+            (["envs", "dev"], "tier"),
+        ):
+            with self.subTest(key=key):
+                m = copy_of(base_manifest())
+                target = m
+                for step in where:
+                    target = target[step]
+                del target[key]
+                self.assertEqual(len(schema.validate(m, self.sch)), 1)
+
+    def test_owner_is_a_handle_never_an_email(self) -> None:
+        for owner, ok in (
+            ("alice", True),
+            ("platform-team", True),
+            ("agilityio/platform", True),
+            ("alice@example.com", False),
+            ("@alice", False),
+            ("", False),
+        ):
+            with self.subTest(owner=owner):
+                m = copy_of(base_manifest())
+                m["project"]["owner"] = owner
+                self.assertEqual(schema.validate(m, self.sch) == [], ok)
+
+    def test_tier_enum(self) -> None:
+        m = copy_of(base_manifest())
+        m["envs"]["dev"]["tier"] = "staging"
+        self.assertEqual(len(schema.validate(m, self.sch)), 1)
+
+    def test_empty_envs_is_a_schema_issue(self) -> None:
+        m = copy_of(base_manifest())
+        m["envs"] = {}
+        issues = schema.validate(m, self.sch)
+        self.assertEqual([i.path for i in issues], ["envs"])
+
+    def test_probes(self) -> None:
+        def issues(probes: Any) -> int:
+            m = copy_of(base_manifest())
+            m["envs"]["dev"]["release"] = {"probes": probes}
+            return len(schema.validate(m, self.sch))
+
+        self.assertEqual(issues(["/health", "/version"]), 0)
+        self.assertEqual(issues(["/a/b-c.d~e"]), 0)
+        self.assertEqual(issues([]), 1)
+        self.assertEqual(issues(["health"]), 1)
+        self.assertEqual(issues(["/a b"]), 1)
+        self.assertEqual(issues(["/x?y=1"]), 1)
+
+    def test_workload_sizing_and_needs(self) -> None:
+        m = copy_of(base_manifest())
+        m["workload"]["needs"] = ["websockets"]
+        self.assertEqual(schema.validate(m, self.sch), [])
+        m["workload"]["peak_rps"] = 0
+        self.assertEqual(len(schema.validate(m, self.sch)), 1)
 
     def test_schema_version_must_be_one(self) -> None:
         m = copy_of(base_manifest())

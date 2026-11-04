@@ -1,8 +1,8 @@
 """Interpreter for a fixed subset of JSON Schema 2020-12 (stdlib only).
 
 Supported validation keywords: type, enum, const, required, properties,
-additionalProperties, items, pattern, minimum, maximum, minItems, and $ref to a local
-"#/$defs/<name>". Annotation and structural keywords ($schema, $id, $defs, title,
+additionalProperties, minProperties, items, pattern, minimum, maximum, minItems, and $ref to a
+local "#/$defs/<name>". Annotation and structural keywords ($schema, $id, $defs, title,
 description) are accepted. Anything else makes check_schema_keywords report a problem.
 """
 
@@ -24,6 +24,7 @@ VALIDATION_KEYWORDS = frozenset(
         "minimum",
         "maximum",
         "minItems",
+        "minProperties",
         "$ref",
     }
 )
@@ -153,6 +154,8 @@ def _check_object(
     path: str,
     out: list[SchemaIssue],
 ) -> None:
+    if "minProperties" in schema and len(value) < schema["minProperties"]:
+        out.append(SchemaIssue(path, f"needs at least {schema['minProperties']} key(s)"))
     for key in schema.get("required", []):
         if key not in value:
             out.append(SchemaIssue(path, f"missing required key '{key}'"))

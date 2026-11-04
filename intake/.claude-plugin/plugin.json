@@ -1,6 +1,9 @@
 {
   "name": "sis-intake",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Interview a product idea, then draft a validated platform.yaml, a first ADR and a pipeline proposal for sis-platform.",
+  "author": {
+    "name": "trungleviet-agilityio"
+  },
   "repository": "https://github.com/trungleviet-agilityio/sis-platform"
 }

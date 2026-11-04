@@ -21,8 +21,8 @@ text. You write nothing into the project repo: the orchestrating session in the 
   architecture for new apps.
 - Never ask for, accept or write an AWS account ID. Accounts are labels (`dev`, `prod`). If the user pastes a
   12-digit number, ask them to use a label (rule V10).
-- Never run AWS, Terraform or `gh` write commands. Never write into the project repo. The only command you run is
-  the validator below.
+- Never run AWS, Terraform or `gh` write commands. Never write into the project repo, and write no temp file. The
+  only command you run is the validator below, with the draft on stdin.
 - The manifest uses a YAML subset: block maps and lists, plain or quoted scalars, int, bool, null, comments, one-line
   flow lists and flow maps. No anchors, aliases, tags, multi-line scalars or nested flow maps. Quote strings that look
   like numbers, dates or yes/no.
@@ -32,12 +32,16 @@ text. You write nothing into the project repo: the orchestrating session in the 
 1. Run the interview, Q1 to Q9 (and Q10 when it applies). If Q10 answers retire, retain, relocate or repurchase,
    stop and return a short note instead of a manifest.
 2. Draft the manifest. Start from the example closest to the answers in `${CLAUDE_PLUGIN_ROOT}/examples/valid/`
-   and `schema_version: 1`. Write the draft to a temporary file outside the project repo (for example under the
-   system temp directory).
-3. Validate:
+   and `schema_version: 1`. Every manifest needs `project.owner` (a GitHub login or team handle, never an email),
+   `budget.monthly_usd`, and a `tier` (`prod` or `nonprod`) on each env. A `prod` tier env also needs
+   `compliance.data_class`, `dr.rto_minutes`, `dr.rpo_minutes`, `workload.peak_rps` and `workload.p95_ms`. Keep
+   the draft in the conversation; write no file.
+3. Validate by sending the draft to the validator on stdin:
 
    ```
-   python3 "${CLAUDE_PLUGIN_ROOT}/sis_intake/validate.py" <temp-file>
+   python3 "${CLAUDE_PLUGIN_ROOT}/sis_intake/validate.py" - <<'YAML'
+   <the manifest>
+   YAML
    ```
 
    Exit code 0 means valid, 1 means errors, 2 means a parse or usage error. Read each finding (`id`, `path`,
