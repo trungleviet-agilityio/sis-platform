@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """PreToolUse guard: block commands that change AWS or GitHub state, and reads of secret files.
 
-Layer 3 of the guardrails (see docs/adr/0001-lab-decisions.md, D8). Permission deny rules match the
-command text as written, so `terraform -chdir=envs/dev apply` or `bash -c '...'` slip past them.
+Layer 3 of the guardrails (ADR 0001 B8, ADR 0002 S2). Permission deny rules match the command text as
+written, so `terraform -chdir=envs/dev apply` or `bash -c '...'` slip past them.
 This hook scans the whole command string instead. Exit code 2 blocks the call and shows stderr to
 Claude.
 
 The GitHub rules (merges, workflow dispatch, `gh api` writes, pushes to main) and the secret file
-rules were added by docs/adr/0013-sis-team-guard-hardening.md: the `gh` token in this shell is the
+rules come from the ship-it-serverless guard (its ADR 0013): the `gh` token in this shell is the
 owner's, so a `gh api` write could approve a pending environment deployment, which runs terraform
 apply. Ideas for the push and secret file rules come from super-board
 (github.com/EricTechPro/super-board, MIT).
@@ -72,7 +72,7 @@ SECRET_FILE_PATTERNS = [
 
 def block(label: str, hint: str = "Print the exact command for the user instead.") -> int:
     print(
-        f"sis-team guard blocked this call ({label}). NFR-9: Claude prepares it, "
+        f"sis-team guard blocked this call ({label}). ADR 0001 B8: Claude prepares it, "
         f"the user runs it at the checkpoint. {hint}",
         file=sys.stderr,
     )
