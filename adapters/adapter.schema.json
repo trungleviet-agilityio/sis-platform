@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:sis-platform:adapter:1",
+  "title": "sis-platform adapter declaration (adapters/<kind>/adapter.json), contract_version 1",
+  "description": "Declares what one runtime adapter supports (K6). Uses only the keyword subset interpreted by intake/sis_intake/schema.py. kind is a pattern, not the manifest enum, so a project adapter (P15 step 4) can declare its own. Host templates are literal lowercase host names whose only placeholder is {region}.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract_version", "kind", "strategies", "engines", "deploy_role_profile", "egress_hosts",
+    "max_step_seconds"
+  ],
+  "properties": {
+    "contract_version": {"const": 1},
+    "kind": {"type": "string", "pattern": "^[a-z][a-z0-9-]{1,30}$"},
+    "strategies": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"enum": ["all-at-once", "rolling", "canary", "linear", "blue-green"]}
+    },
+    "engines": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"enum": ["auto", "pipeline", "codedeploy", "ecs-native", "argo-rollouts", "asg"]}
+    },
+    "deploy_role_profile": {"type": "string", "pattern": "^[a-z][a-z0-9-]{1,40}$"},
+    "egress_hosts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["deploy", "verify", "rollback", "status"],
+      "properties": {
+        "deploy": {"$ref": "#/$defs/hosts"},
+        "verify": {"$ref": "#/$defs/hosts"},
+        "rollback": {"$ref": "#/$defs/hosts"},
+        "status": {"$ref": "#/$defs/hosts"}
+      }
+    },
+    "max_step_seconds": {"type": "integer", "minimum": 1}
+  },
+  "$defs": {
+    "hosts": {
+      "type": "array",
+      "items": {"type": "string", "pattern": "^([a-z0-9]|\\{region\\})([a-z0-9-]|\\{region\\})*(\\.([a-z0-9]|\\{region\\})([a-z0-9-]|\\{region\\})*)*$"}
+    }
+  }
+}
