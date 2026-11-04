@@ -58,6 +58,7 @@ BLOCKED = [
         "gh sign-in, scopes or token",
     ),
     (r"\bgh\s+(alias|extension|ext)\b", "gh alias or extension"),
+    (r"\bgh\s+release\s+(create|edit|delete|upload|delete-asset)\b", "GitHub release change"),
     (r"\bgh\s+project\s+(delete|close|field-delete|item-delete)\b", "GitHub Project deletion"),
 ]
 
@@ -75,6 +76,8 @@ BOARD_TOKEN_ITEM = "sis-board-token"
 BOARD_TOKEN_SAFE_COMMANDS = {"grep", "rg", "git"}
 INLINE_TOKEN = re.compile(r"^(GH_TOKEN|GITHUB_TOKEN|GH_ENTERPRISE_TOKEN)=")
 
+STDIN_LABEL = "shell reads its script from stdin"
+STDIN_HINT = "A shell must run a script file or a -c string the guard can read. Print the command for the user."
 RM_HINT = "Recursive deletes stay under this repo or worktree. Print the command for the user."
 PROTECTED_BRANCHES = {"main", "master"}
 SHELLS = {"sh", "bash", "zsh", "dash", "ksh"}
@@ -165,18 +168,23 @@ def mask(text: str, double: bool = True) -> str:
     return "".join(out)
 
 
-def split_segments(text: str) -> list[str]:
-    """Split on ; | & newline ( ) and backtick outside quotes. `&&` and `||` fall out of the same rule."""
-    segs: list[str] = []
+def split_segments(text: str) -> list[tuple[str, bool, bool]]:
+    """Split on ; | & newline ( ) and backtick outside quotes. `&&` and `||` fall out of the same rule.
+
+    Each item is (segment, piped, procsub): piped when a single `|` came right before it, procsub when
+    it ends in `<` and a `(` follows (a process substitution feeds it).
+    """
+    segs: list[tuple[str, bool, bool]] = []
     cur: list[str] = []
+    state = {"sep": ""}
     quote = ""
     i = 0
     n = len(text)
 
-    def flush() -> None:
-        s = "".join(cur).strip()
-        if s:
-            segs.append(s)
+    def flush(proc: bool = False) -> None:
+        body = "".join(cur).strip()
+        if body:
+            segs.append((body, state["sep"] == "|", proc))
         cur.clear()
 
     while i < n:
@@ -200,14 +208,28 @@ def split_segments(text: str) -> list[str]:
         elif ch in "'\"":
             quote = ch
             cur.append(ch)
-        elif ch in ";\n|`()":
+        elif ch == "|":
             flush()
+            if i + 1 < n and text[i + 1] == "|":
+                state["sep"] = "||"
+                i += 1
+            else:
+                state["sep"] = "|"
+                if i + 1 < n and text[i + 1] == "&":
+                    i += 1
+        elif ch == "(" and cur and cur[-1].endswith("<"):
+            flush(proc=True)
+            state["sep"] = "("
+        elif ch in ";\n`()":
+            flush()
+            state["sep"] = ch
         elif ch == "&":
             redirect = (i > 0 and text[i - 1] in "<>") or (i + 1 < n and text[i + 1] == ">")
             if redirect:
                 cur.append(ch)
             else:
                 flush()
+                state["sep"] = "&"
         else:
             cur.append(ch)
         i += 1
@@ -521,6 +543,15 @@ def branch_name(ref: str) -> str:
     return ref
 
 
+TAG_LABEL = "push of a release tag"
+
+
+def is_release_ref(ref: str) -> bool:
+    """refs/tags/*, tags/*, a version-like name (v1, v1.2.3) or a v* glob."""
+    ref = ref.lstrip("+")
+    return ref.startswith(("refs/tags/", "tags/")) or re.match(r"^v(\d|\*)", ref) is not None
+
+
 def git_push_problem(toks: list[str], cwd: str) -> str | None:
     """Return why a `git push` (tokens starting at `git`) is blocked.
 
@@ -543,18 +574,24 @@ def git_push_problem(toks: list[str], cwd: str) -> str | None:
     valued = {"-o", "--push-option", "--receive-pack", "--exec"}
     skip = [j for j, a in enumerate(args) if a in valued]
     args = [a for j, a in enumerate(args) if j not in skip and j - 1 not in skip]
+    if any(a in ("--tags", "--follow-tags") for a in args):
+        return TAG_LABEL
     for f in [a for a in args if a.startswith("-")]:
         if f in ("-f", "--force", "--mirror", "--all", "--delete", "-d", "--prune") or (
             re.match(r"^-[a-zA-Z]*[fd]", f) and not f.startswith("--")
         ):
             return f"git push {f}"
     rest = [a for a in args if not a.startswith("-")]
+    if "tag" in rest[1:2]:
+        return TAG_LABEL
     has_repo_flag = any(a.startswith("--repo=") for a in args)
     refspecs = (rest if has_repo_flag else rest[1:]) or ["HEAD"]
     for spec in refspecs:
         if spec.startswith("+"):
             return "force push (+refspec)"
         src, colon, dst = spec.partition(":")
+        if any(is_release_ref(r) for r in (src, dst)):
+            return TAG_LABEL
         if colon and not src:
             return f"git push delete refspec ({spec})"
         target = branch_name(dst if dst else src)
@@ -670,7 +707,75 @@ def check_tokens(toks: list[str], cwd: str, roots: list[str], depth: int) -> int
     return 0
 
 
-def check_segment(seg: str, cwd: str, roots: list[str], depth: int) -> int:
+def shell_input_problem(
+    leader: str, args: list[str], cwd: str, depth: int, piped: bool, procsub: bool, has_bodies: bool
+) -> int | None:
+    """Check a shell or `source` that takes its script from somewhere other than `-c`.
+
+    Returns a block code, 0 when the script was a literal here-string that passed the scan, or None when
+    the command is not a shell reading input (nothing to do).
+    """
+    is_shell = leader in SHELLS
+    if not is_shell and leader not in ("source", "."):
+        return None
+    if is_shell and shell_c_argument(args) is not None:
+        return None
+    herestring = None
+    stdin_file = False
+    heredoc = False
+    clean: list[str] = []
+    i = 0
+    while i < len(args):
+        a = args[i]
+        if a.startswith("<<<"):
+            herestring = a[3:] or (args[i + 1] if i + 1 < len(args) else "")
+            i += 1 if a[3:] else 2
+        elif a.startswith("<<"):
+            heredoc = True
+            i += 1 if a not in ("<<", "<<-") else 2
+        elif a == "<":
+            stdin_file = True
+            i += 2
+        elif a.startswith("<") and not a.startswith("<("):
+            stdin_file = True
+            i += 1
+        elif re.match(r"^(\d*>>?|&>>?)", a):
+            i += 2 if re.fullmatch(r"(\d*>>?|&>>?)", a) else 1
+        else:
+            clean.append(a)
+            i += 1
+    if procsub:
+        return block(
+            "shell fed from a process substitution",
+            "A shell must run a script file or a -c string the guard can read. Print the command for the user.",
+        )
+    script = [a for a in clean if not a.startswith("-")]
+    if any(re.match(r"^/dev/(stdin|fd/|tty)", a) for a in script):
+        return block(STDIN_LABEL, STDIN_HINT)
+    if herestring is not None:
+        return check_bash(herestring, cwd, depth + 1)
+    if heredoc:
+        return 0 if has_bodies else block(STDIN_LABEL, STDIN_HINT)
+    if stdin_file:
+        return block(STDIN_LABEL, STDIN_HINT)
+    reads_stdin = is_shell and ("-s" in clean or not script)
+    if piped and reads_stdin:
+        return block(
+            "shell fed from a pipe",
+            "A shell must run a script file or a -c string the guard can read. Print the command for the user.",
+        )
+    return None
+
+
+def check_segment(
+    seg: str,
+    cwd: str,
+    roots: list[str],
+    depth: int,
+    piped: bool = False,
+    procsub: bool = False,
+    has_bodies: bool = False,
+) -> int:
     toks = words(seg)
     if not toks:
         return 0
@@ -687,6 +792,10 @@ def check_segment(seg: str, cwd: str, roots: list[str], depth: int) -> int:
                 "board token read",
                 "Only board.py reads the sis-board-token Keychain item. Ask the user.",
             )
+    if stripped:
+        fed = shell_input_problem(leader, stripped[1:], cwd, depth, piped, procsub, has_bodies)
+        if fed:
+            return fed
     rc = check_tokens(stripped, cwd, roots, depth)
     if rc:
         return rc
@@ -716,7 +825,13 @@ def check_bash(command: str, cwd: str, depth: int = 0) -> int:
         rc = check_bash(inner, here, depth + 1)
         if rc:
             return rc
-    for seg in split_segments(text):
+    visible = mask(text, double=False)
+    if re.search(r"\bgit\b[^;&|\n]*\bpush\b[^;&|\n]*(\$\(|`)", visible):
+        return block(
+            "git push with a command substitution",
+            "The remote or refspec cannot be checked. Write the branch name out.",
+        )
+    for seg, piped, procsub in split_segments(text):
         moved = cd_target(words(seg), here)
         if moved is not None:
             here = moved
@@ -725,7 +840,7 @@ def check_bash(command: str, cwd: str, depth: int = 0) -> int:
             if "rm" in words(seg):
                 return block("rm -r outside the repo (unknown directory)", RM_HINT)
             continue
-        rc = check_segment(seg, here, roots, depth)
+        rc = check_segment(seg, here, roots, depth, piped, procsub, bool(bodies))
         if rc:
             return rc
     # A heredoc fed to a shell or python is a program, not text.
@@ -764,7 +879,9 @@ def main() -> int:
     try:
         event = json.load(sys.stdin)
     except json.JSONDecodeError:
-        return 0
+        event = None
+    if not isinstance(event, dict):
+        return block("malformed hook input", "The guard failed closed. Ask the user.")
     tool = event.get("tool_name", "Bash")
     try:
         tool_input = event.get("tool_input", {}) or {}
