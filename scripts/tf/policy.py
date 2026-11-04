@@ -197,7 +197,7 @@ def _env_name(boundary_arn: Optional[str]) -> Tuple[Optional[str], str]:
         r"arn:[^:]*:iam::([0-9]{12}):policy/(.+)-workload-boundary", boundary_arn or ""
     )
     if match is None:
-        return None, "000000000000"
+        return None, "123456789012"
     return match.group(2), match.group(1)
 
 
