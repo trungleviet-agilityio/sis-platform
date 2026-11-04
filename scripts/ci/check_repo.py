@@ -60,7 +60,7 @@ ACCOUNT_ID_RE = re.compile(r"(?<![0-9A-Za-z])[0-9]{12}(?![0-9A-Za-z])")
 ACCOUNT_EXPR_RE = re.compile(r"^secrets\.AWS_ACCOUNT_ID(_[A-Z0-9]+)?$")
 REGION_EXPR = "needs.resolve.outputs.region"
 VARS_EXPR_RE = re.compile(r"^vars\.[A-Za-z_][A-Za-z0-9_]*$")
-FAMILY_IF_RE = re.compile(r"needs\.resolve\.outputs\.family\s*==\s*'[A-Za-z0-9_-]+'")
+FAMILY_TERM_RE = re.compile(r"needs\.resolve\.outputs\.family=='[A-Za-z0-9_-]+'")
 # Reusable files whose credentialed jobs are not per runtime family (claims and trust smoke test).
 FAMILY_EXEMPT = ("reusable-oidc-smoke.yml",)
 CANCEL_PR_ONLY = "${{ github.event_name == 'pull_request' }}"
@@ -69,10 +69,13 @@ ASSUME_RUN_RE = re.compile(
 )
 ASSUME_ACTIONS = ("aws-actions/configure-aws-credentials@",)
 PLATFORM_PATH_RE = re.compile(r"\.platform/([A-Za-z0-9_./-]+)")
-SOURCE_RE = re.compile(
-    r"""^\s*(?:source|\.)\s+["']?"""
+DIR_REF_RE = re.compile(
     r"""(?:\$\(dirname\s+"?\$\{?(?:0|BASH_SOURCE\[0\])\}?"?\)|\$\{?(?P<root>ROOT)\}?)"""
-    r"""/(?P<rel>[^"'\s]+)"""
+    r"""/(?P<rel>[^"'\s;&|)]+)"""
+)
+CALL_RE = re.compile(
+    r"""(?:^|&&|\|\||[;(]|\bthen\b|\bdo\b|\belse\b)\s*(?:(?:bash|sh|source|\.)\s+|(?=\./))"""
+    r"""["']?(?P<p>[^\s"';&|)]+)"""
 )
 
 
@@ -149,16 +152,28 @@ def triggers_of(doc: dict[Any, Any]) -> tuple[set[str], Any]:
 
 
 def perms_problems(where: str, perms: Any) -> list[str]:
-    if perms in ("write-all", "read-all"):
+    if isinstance(perms, str) and perms.strip().lower() in ("write-all", "read-all"):
         return [f"{where}: permissions '{perms}' is not allowed (list the scopes you need)"]
     return []
 
 
 def has_id_token(perms: Any) -> bool:
-    return isinstance(perms, dict) and perms.get("id-token") == "write"
+    value = perms.get("id-token") if isinstance(perms, dict) else None
+    return isinstance(value, str) and value.strip().lower() == "write"
+
+
+def effective_lines(script: str) -> str:
+    """Script lines that can run something: no comments, no echo or printf."""
+    kept = []
+    for line in script.splitlines():
+        text = line.strip()
+        if text and not text.startswith(("#", "echo ", "printf ")):
+            kept.append(text)
+    return "\n".join(kept)
 
 
 def job_assumes_role(job: dict[str, Any]) -> bool:
+    """Advisory heuristic for H2: a text match, not proof that the step really assumes a role."""
     if "uses" in job:  # a call of a reusable workflow: the callee assumes the role
         return True
     steps = job.get("steps")
@@ -169,14 +184,37 @@ def job_assumes_role(job: dict[str, Any]) -> bool:
         if isinstance(uses, str) and uses.startswith(ASSUME_ACTIONS):
             return True
         run = step.get("run")
-        if isinstance(run, str) and ASSUME_RUN_RE.search(run):
+        if isinstance(run, str) and ASSUME_RUN_RE.search(effective_lines(run)):
             return True
         script = (
             (step.get("with") or {}).get("script") if isinstance(step.get("with"), dict) else None
         )
-        if isinstance(script, str) and ASSUME_RUN_RE.search(script):
+        if isinstance(script, str) and ASSUME_RUN_RE.search(effective_lines(script)):
             return True
     return False
+
+
+def family_gated(condition: Any) -> bool:
+    """Whether an `if:` is the family test, optionally AND-ed with other terms (never OR-ed)."""
+    text = re.sub(r"\s+", "", str(condition))
+    if text.startswith("${{") and text.endswith("}}"):
+        text = text[3:-2]
+    if "||" in text or "${{" in text:
+        return False
+    return any(FAMILY_TERM_RE.fullmatch(term) for term in text.split("&&"))
+
+
+def push_cancel_problems(where: str, concurrency: Any) -> list[str]:
+    """H8: on a push workflow, cancel-in-progress is false or exactly the pull_request-only test."""
+    cancel = cancel_value(concurrency)
+    if cancel is None or is_false(cancel):
+        return []
+    if re.sub(r"\s+", " ", str(cancel)).strip() == CANCEL_PR_ONLY:
+        return []
+    return [
+        f"{where}: concurrency cancels in progress for pushes; use "
+        f"cancel-in-progress: {CANCEL_PR_ONLY} (H8)"
+    ]
 
 
 def cancel_value(concurrency: Any) -> Any:
@@ -254,7 +292,7 @@ def harden_problems(job: dict[str, Any], credentialed: bool) -> list[str]:
     return problems
 
 
-def checkout_problems(job: dict[str, Any]) -> list[str]:
+def checkout_problems(job: dict[str, Any], reusable: bool = False) -> list[str]:
     problems: list[str] = []
     steps = job.get("steps")
     for step in steps if isinstance(steps, list) else []:
@@ -262,19 +300,27 @@ def checkout_problems(job: dict[str, Any]) -> list[str]:
         with_ = step.get("with") if isinstance(step, dict) else None
         if not (isinstance(uses, str) and uses.startswith("actions/checkout@")):
             continue
-        if not isinstance(with_, dict) or str(with_.get("repository", "")).lower() != PLATFORM_REPO:
+        if not isinstance(with_, dict):
             continue
+        repository = str(with_.get("repository", ""))
+        literal = repository.lower() == PLATFORM_REPO
+        # In a reusable file a checkout into .platform, or of a computed repository, is the
+        # platform checkout.
+        into_platform = str(with_.get("path", "")).strip().strip("./") == "platform"
+        if not literal and not (reusable and (into_platform or "${{" in repository)):
+            continue
+        if not literal:
+            problems.append(
+                f"a platform checkout must set repository to the literal {PLATFORM_REPO}, "
+                "not an expression (O11)"
+            )
         ref = re.sub(r"\s+", "", str(with_.get("ref", "")))
         if ref != "${{job.workflow_sha}}":
-            problems.append(
-                f"a checkout of {PLATFORM_REPO} must use ref: ${{{{ job.workflow_sha }}}} (H5)"
-            )
+            problems.append("a platform checkout must use ref: ${{ job.workflow_sha }} (H5)")
         if not with_.get("sparse-checkout"):
-            problems.append(f"a checkout of {PLATFORM_REPO} must set sparse-checkout (H5)")
+            problems.append("a platform checkout must set sparse-checkout (H5)")
         elif not is_false(with_.get("sparse-checkout-cone-mode")):
-            problems.append(
-                f"a checkout of {PLATFORM_REPO} must set sparse-checkout-cone-mode: false (O11)"
-            )
+            problems.append("a platform checkout must set sparse-checkout-cone-mode: false (O11)")
     return problems
 
 
@@ -312,6 +358,32 @@ def check_triggers(path: str, doc: dict[Any, Any], consumer: bool, reusable: boo
     return problems
 
 
+PLATFORM_BARE_RE = re.compile(r"\.platform(?![A-Za-z0-9_.-]|/)")
+PATH_LINE_RE = re.compile(r"""^\s*path:\s*["']?\.platform["']?\s*$""")
+
+
+def reusable_problems(path: str, text: str, doc: Any) -> list[str]:
+    """Extra rules for reusable-*.yml: no local actions; every .platform use is a visible path."""
+    problems = [
+        f"{path}: uses the local action '{ref}', which the caller's checkout does not hold"
+        for ref in collect_uses(doc)
+        if ref.startswith("./")
+    ]
+    for lineno, line in enumerate(text.splitlines(), 1):
+        code = line.split(" #")[0]
+        if re.search(r"working-directory:.*\.platform", code):
+            problems.append(
+                f"{path}:{lineno}: working-directory under .platform hides script paths from the "
+                "closure check (H6); write the full .platform/<path>"
+            )
+        elif PLATFORM_BARE_RE.search(code) and not PATH_LINE_RE.match(code):
+            problems.append(
+                f"{path}:{lineno}: refers to .platform without a trailing slash, so the closure "
+                "check cannot see the path (H6); write .platform/<path>"
+            )
+    return problems
+
+
 def check_workflow(path: str) -> list[str]:
     import yaml
 
@@ -329,20 +401,16 @@ def check_workflow(path: str) -> list[str]:
     consumer = "examples/consumer/" in path.replace(os.sep, "/")
 
     problems = check_uses(path, text, doc)
+    if reusable:
+        problems += reusable_problems(path, text, doc)
     if doc.get("permissions", "missing") != {}:
         problems.append(f"{path}: top-level 'permissions: {{}}' is required")
     problems += perms_problems(path, doc.get("permissions"))
     problems += check_triggers(path, doc, consumer, reusable)
 
     triggers, _ = triggers_of(doc)
-    workflow_cancel = cancel_value(doc.get("concurrency"))
-    if "push" in triggers and workflow_cancel is not None and not is_false(workflow_cancel):
-        normal = re.sub(r"\s+", " ", str(workflow_cancel)).strip()
-        if normal != CANCEL_PR_ONLY:
-            problems.append(
-                f"{path}: concurrency cancels in progress for pushes; use "
-                f"cancel-in-progress: {CANCEL_PR_ONLY} (H8)"
-            )
+    if "push" in triggers:
+        problems += push_cancel_problems(path, doc.get("concurrency"))
 
     jobs = doc.get("jobs")
     if not isinstance(jobs, dict):
@@ -353,6 +421,8 @@ def check_workflow(path: str) -> list[str]:
         perms = job.get("permissions", doc.get("permissions"))
         problems += perms_problems(here, job.get("permissions"))
         credentialed = has_id_token(perms)
+        if "push" in triggers:
+            problems += push_cancel_problems(here, job.get("concurrency"))
         if credentialed and not job_assumes_role(job):
             problems.append(
                 f"{here}: id-token: write on a job that neither assumes a role, prints OIDC claims "
@@ -374,8 +444,8 @@ def check_workflow(path: str) -> list[str]:
         if "uses" in job:  # a reusable-workflow call has no steps; its callee is checked itself
             continue
         problems += [f"{here}: {m}" for m in harden_problems(job, credentialed)]
-        problems += [f"{here}: {m}" for m in checkout_problems(job)]
-        gated = FAMILY_IF_RE.search(str(job.get("if", "")))
+        problems += [f"{here}: {m}" for m in checkout_problems(job, reusable)]
+        gated = family_gated(job.get("if", ""))
         if credentialed and reusable and base not in FAMILY_EXEMPT and not gated:
             problems.append(
                 f"{here}: a credentialed job in a reusable workflow must be gated by "
@@ -432,17 +502,33 @@ def git_files(repo: str, pathspecs: list[str] | None = None) -> set[str]:
     return {p for p in out.split("\0") if p}
 
 
-def sourced_by(repo: str, rel: str) -> list[str]:
-    """Repo-relative paths a bash script sources through `$(dirname "$0")/x` or `$ROOT/x`."""
+def sourced_by(repo: str, rel: str) -> tuple[list[str], list[str]]:
+    """Paths a bash script runs or sources, and the calls whose path holds a variable.
+
+    Followed: `$(dirname "$0")/x`, `$(dirname "${BASH_SOURCE[0]}")/x` and `$ROOT/x` anywhere on a
+    line, and `source x`, `. x`, `bash x`, `sh x`, `./x` at a command position (line start, after
+    `&&`, `||`, `;`, `(`, `then`, `do`, `else`), resolved from the script's directory. Not followed:
+    Python imports and data files read by other means, so closure.txt must list whole directories.
+    """
     text = read(os.path.join(repo, rel))
     found: list[str] = []
+    unresolved: list[str] = []
     for line in (text or "").splitlines():
-        match = SOURCE_RE.match(line)
-        if not match or "$" in match.group("rel"):
+        if line.lstrip().startswith("#"):
             continue
-        base = "" if match.group("root") else posixpath.dirname(rel)
-        found.append(posixpath.normpath(posixpath.join(base, match.group("rel"))))
-    return found
+        for match in DIR_REF_RE.finditer(line):
+            base = "" if match.group("root") else posixpath.dirname(rel)
+            found.append(posixpath.normpath(posixpath.join(base, match.group("rel"))))
+        rest = DIR_REF_RE.sub("@@", line)
+        for call in CALL_RE.finditer(rest):
+            target = call.group("p")
+            if target.startswith(("@@", "-")):
+                continue
+            if "$" in target:
+                unresolved.append(target)
+            else:
+                found.append(posixpath.normpath(posixpath.join(posixpath.dirname(rel), target)))
+    return found, unresolved
 
 
 def check_closure(workflow: str, repo: str, closure: str) -> list[str]:
@@ -478,17 +564,31 @@ def check_closure(workflow: str, repo: str, closure: str) -> list[str]:
             seen.add(current)
             if current not in covered:
                 problems.append(f"{workflow}: .platform/{current} is not covered by {closure} (H6)")
-            for dep in sourced_by(repo, current):
-                if dep not in tracked:
-                    problems.append(
-                        f"{workflow}: .platform/{current} sources {dep}, not tracked (H6)"
-                    )
-                elif dep not in covered:
-                    problems.append(
-                        f"{workflow}: .platform/{current} sources {dep}, which is not covered by "
-                        f"{closure} (H6)"
-                    )
-                queue.append(dep)
+            deps, unresolved = sourced_by(repo, current)
+            problems.extend(
+                f"{workflow}: .platform/{current} runs or sources {target}, a path with a "
+                "variable the closure check cannot resolve (H6)"
+                for target in unresolved
+            )
+            for dep in deps:
+                members = (
+                    [dep]
+                    if dep in tracked
+                    else sorted(f for f in tracked if f.startswith(dep + "/"))
+                )
+                if not members:
+                    if dep.endswith((".sh", ".py")):
+                        problems.append(
+                            f"{workflow}: .platform/{current} sources {dep}, not tracked (H6)"
+                        )
+                    continue  # any other missing path is an output or a temp file
+                for member in members:
+                    if member not in covered:
+                        problems.append(
+                            f"{workflow}: .platform/{current} sources {member}, which is not "
+                            f"covered by {closure} (H6)"
+                        )
+                    queue.append(member)
     return sorted(set(problems))
 
 

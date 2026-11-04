@@ -57,6 +57,17 @@ expect_fail workflow "$fx/bad-no-concurrency.yml" "needs a concurrency group wit
 expect_fail workflow "$fx/bad-cancel-credentialed.yml" "concurrency cancel-in-progress must be false"
 expect_fail workflow "$fx/bad-cancel-push.yml" "concurrency cancels in progress for pushes"
 expect_pass workflow "$fx/reusable-good.yml"
+expect_fail workflow "$fx/reusable-bad-family-or.yml" "must be gated by if: needs.resolve.outputs.family"
+expect_fail workflow "$fx/reusable-bad-checkout-expr.yml" "must set repository to the literal trungleviet-agilityio/sis-platform, not an expression (O11)"
+expect_fail workflow "$fx/reusable-bad-checkout-expr.yml" 'must use ref: ${{ job.workflow_sha }}'
+expect_fail workflow "$fx/reusable-bad-workdir.yml" "working-directory under .platform"
+expect_fail workflow "$fx/reusable-bad-cd.yml" "refers to .platform without a trailing slash"
+expect_fail workflow "$fx/reusable-bad-var.yml" "refers to .platform without a trailing slash"
+expect_fail workflow "$fx/reusable-bad-local-uses.yml" "uses the local action './.github/actions/local'"
+expect_fail workflow "$fx/bad-cancel-push-job.yml" "job 'a': concurrency cancels in progress for pushes"
+expect_fail workflow "$fx/bad-permissions-case.yml" "id-token: write on a job that neither assumes a role"
+expect_fail workflow "$fx/bad-write-all-case.yml" "permissions 'Write-All' is not allowed"
+expect_fail workflow "$fx/bad-id-token-echo.yml" "id-token: write on a job that neither assumes a role"
 expect_fail workflow "$fx/reusable-bad-no-family.yml" "must be gated by if: needs.resolve.outputs.family"
 expect_fail workflow "$fx/reusable-bad-trigger.yml" "declares trigger 'push' (only workflow_call is allowed)"
 expect_pass workflow "$fx/examples/consumer/.github/workflows/good.yml"
@@ -76,6 +87,10 @@ tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 printf 'name: dup\non:\n  pull_request:\non:\n  push:\npermissions: {}\njobs: {}\n' >"$tmp/dup.yml"
 expect_fail workflow "$tmp/dup.yml" "duplicate key in a mapping"
+sed "s/family == 'lambda'/family == 'lambda' \&\& inputs.go/" "$fx/reusable-good.yml" >"$tmp/reusable-and.yml"
+expect_pass workflow "$tmp/reusable-and.yml"
+sed "s/    if: needs/    if: \${{ needs/;s/'lambda'\$/'lambda' }}/" "$fx/reusable-good.yml" >"$tmp/reusable-wrapped.yml"
+expect_pass workflow "$tmp/reusable-wrapped.yml"
 sed 's#sts.eu-west-1.amazonaws.com:443#111111111111.dkr.ecr.eu-west-1.amazonaws.com:443#' \
   "$fx/reusable-good.yml" >"$tmp/reusable-account.yml"
 expect_fail workflow "$tmp/reusable-account.yml" "holds a 12-digit literal"
@@ -110,12 +125,25 @@ expect_closure_fail() { # <message fragment>
   [ "$rc" -ne 0 ] || die "selftest: closure should fail with '$1' but passed"
   case "$out" in *"$1"*) ;; *) die "selftest: closure failed without '$1'. Got: $out" ;; esac
 }
+printf '#!/usr/bin/env bash\nif true; then bash ../tf/policy.sh; fi\n' >"$repo/scripts/platform/calls-bash.sh"
+printf '#!/usr/bin/env bash\ntrue && source "$ROOT/scripts/tf/helper.sh"\n' >"$repo/scripts/platform/and-source.sh"
+printf '#!/usr/bin/env bash\n./sibling.sh\n' >"$repo/scripts/platform/calls-dot.sh"
+printf '#!/usr/bin/env bash\nsource "$LIBDIR/lib.sh"\n' >"$repo/scripts/platform/uses-var.sh"
+git -C "$repo" add -A
 uses_script scripts/platform/ok.sh
 expect_closure_pass "a glob-covered script that sources a covered file"
 uses_script scripts/tf/policy.sh
 expect_closure_fail "scripts/tf/policy.sh is not covered by"
 uses_script scripts/platform/sourcing.sh
 expect_closure_fail "sources scripts/tf/helper.sh, which is not covered by"
+uses_script scripts/platform/calls-bash.sh
+expect_closure_fail "sources scripts/tf/policy.sh, which is not covered by"
+uses_script scripts/platform/and-source.sh
+expect_closure_fail "sources scripts/tf/helper.sh, which is not covered by"
+uses_script scripts/platform/calls-dot.sh
+expect_closure_fail "sources scripts/platform/sibling.sh, not tracked"
+uses_script scripts/platform/uses-var.sh
+expect_closure_fail "a path with a variable the closure check cannot resolve"
 git -C "$repo" mv scripts/platform/ok.sh scripts/platform/renamed.sh
 uses_script scripts/platform/ok.sh
 expect_closure_fail ".platform/scripts/platform/ok.sh is not a tracked file"
@@ -123,6 +151,24 @@ uses_script scripts/platform/renamed.sh
 expect_closure_pass "a renamed script under its new name"
 rm -f "$closure_file"
 expect_closure_fail "closure file"
+
+log "no-aws-account-id hook pattern"
+"$py" -I - "$ROOT/.pre-commit-config.yaml" <<'PY' || die "selftest: the no-aws-account-id pattern misbehaves"
+import re
+import sys
+
+import yaml
+
+cfg = yaml.safe_load(open(sys.argv[1], encoding="utf-8"))
+hook = next(h for r in cfg["repos"] for h in r["hooks"] if h["id"] == "no-aws-account-id")
+rx = re.compile(hook["entry"])
+# Built from parts so this file does not trip the hook itself.
+acct, dashed = "99998888" + "7777", "-".join(["9999", "8888", "7777"])
+cases = [(acct, True), (dashed, True), ("1234-5678-9012", False), ("123456789012", False),
+         (dashed + "-6666", False), ("uuid-" + dashed, False)]
+for text, hit in cases:
+    assert bool(rx.search(text)) == hit, (text, hit)
+PY
 
 log "guard on the real repository"
 expect_pass repo "$ROOT"
