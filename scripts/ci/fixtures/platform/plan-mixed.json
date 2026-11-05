@@ -1,0 +1,12 @@
+{
+  "format_version": "1.2",
+  "terraform_version": "1.17.1",
+  "resource_changes": [
+    {"address": "terraform_data.new", "type": "terraform_data", "change": {"actions": ["create"], "after": {}, "after_unknown": {}}},
+    {"address": "terraform_data.changed", "type": "terraform_data", "change": {"actions": ["update"], "after": {}, "after_unknown": {}}},
+    {"address": "terraform_data.gone", "type": "terraform_data", "change": {"actions": ["delete"], "after": null, "after_unknown": {}}},
+    {"address": "terraform_data.swap", "type": "terraform_data", "change": {"actions": ["delete", "create"], "after": {}, "after_unknown": {}}},
+    {"address": "terraform_data.same", "type": "terraform_data", "change": {"actions": ["no-op"], "after": {}, "after_unknown": {}}},
+    {"address": "data.aws_caller_identity.current", "type": "aws_caller_identity", "change": {"actions": ["read"], "after": {}, "after_unknown": {}}}
+  ]
+}

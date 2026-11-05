@@ -19,13 +19,16 @@ Workflow rules:
       `secrets.AWS_ACCOUNT_ID*`, the region only from `needs.resolve.outputs.region` or a literal;
       a credentialed job in a reusable workflow is gated by `needs.resolve.outputs.family == '<x>'`
   H4  triggers are pull_request, push or workflow_call; a `reusable-*.yml` declares
-      workflow_call only; the consumer profile (examples/consumer) also allows
-      workflow_dispatch with the inputs env (choice), sha and digest only
+      workflow_call only; the consumer profile (examples/consumer) also allows schedule (W5
+      weekly platform check) and workflow_dispatch with the inputs env (choice), sha and digest only
   H5  a checkout of sis-platform uses `ref: ${{ job.workflow_sha }}` and a non-cone
       `sparse-checkout`
   H8  workflow concurrency cancels in progress only for pull_request, never for pushes
   H10 a job with `id-token: write` or an `environment` sits under a concurrency group with
       `cancel-in-progress: false`
+  AA3 in reusable-terraform-apply.yml, the `resolve` job and every credentialed job start (after
+      harden-runner) with a step that refuses events other than push and workflow_dispatch and
+      refs other than refs/heads/main
 
 Exit 0 when clean, 1 with one message per finding on stderr, 2 on usage errors.
 Needs PyYAML (workflow and repo modes).
@@ -45,7 +48,8 @@ import sys
 from typing import Any
 
 ALLOWED_TRIGGERS = {"pull_request", "push", "workflow_call"}
-CONSUMER_TRIGGERS = ALLOWED_TRIGGERS | {"workflow_dispatch"}
+# A consumer also runs the W5 platform check weekly (schedule) and dispatches applies and smokes.
+CONSUMER_TRIGGERS = ALLOWED_TRIGGERS | {"workflow_dispatch", "schedule"}
 CONSUMER_INPUTS = ("env", "sha", "digest")
 PLATFORM_REPO = "trungleviet-agilityio/sis-platform"
 SHA_RE = re.compile(r"@[0-9a-f]{40}$")
@@ -346,7 +350,7 @@ def check_triggers(path: str, doc: dict[Any, Any], consumer: bool, reusable: boo
     allowed = CONSUMER_TRIGGERS if consumer else ALLOWED_TRIGGERS
     for trigger in sorted(triggers - allowed):
         names = "pull_request, push, workflow_call" + (
-            ", workflow_dispatch with inputs env, sha, digest" if consumer else ""
+            ", schedule, workflow_dispatch with inputs env, sha, digest" if consumer else ""
         )
         problems.append(f"{path}: trigger '{trigger}' is not allowed (only {names})")
     if reusable:
@@ -396,6 +400,57 @@ def reusable_problems(path: str, text: str, doc: Any) -> list[str]:
                 "check cannot see the path (H6); write .platform/<path>"
             )
     return problems
+
+
+APPLY_FILE = "reusable-terraform-apply.yml"
+# The one accepted text of the AA3 gate step (compared with all whitespace removed).
+APPLY_GATE_RUN = """
+case "$EVENT" in
+  push | workflow_dispatch) ;;
+  *) echo "::error::apply runs only on push or workflow_dispatch, not on ${EVENT} (AA3)"; exit 1 ;;
+esac
+if [ "$REF" != "refs/heads/main" ]; then
+  echo "::error::apply runs only from refs/heads/main, not from ${REF} (O1)"
+  exit 1
+fi
+"""
+APPLY_GATE_MESSAGE = (
+    "the step after harden-runner must be the AA3 gate: env EVENT and REF only, and the run text "
+    "of APPLY_GATE_RUN in scripts/ci/check_repo.py, refusing events other than push and "
+    "workflow_dispatch and refs other than refs/heads/main (AA3)"
+)
+
+
+def squash(value: Any) -> str:
+    return re.sub(r"\s+", "", str(value))
+
+
+def apply_gate_problems(job: dict[str, Any]) -> list[str]:
+    """AA3: in the apply workflow, the step after harden-runner refuses other events and refs.
+
+    Literal on purpose: the step's env is exactly EVENT (github.event_name) and REF (github.ref),
+    its `run` equals APPLY_GATE_RUN with whitespace ignored, and it sets no `if`,
+    `continue-on-error`, `shell`, `working-directory` or `uses` that could skip or soften it.
+    """
+    steps = job.get("steps")
+    step = steps[1] if isinstance(steps, list) and len(steps) > 1 else None
+    if not isinstance(step, dict):
+        return [APPLY_GATE_MESSAGE]
+    problems = [
+        f"the AA3 gate step must not set `{key}:`"
+        for key in ("if", "continue-on-error", "shell", "working-directory", "uses")
+        if key in step
+    ]
+    env = step.get("env")
+    ok = (
+        isinstance(env, dict)
+        and set(env) == {"EVENT", "REF"}
+        and squash(env.get("EVENT")) == "${{github.event_name}}"
+        and squash(env.get("REF")) == "${{github.ref}}"
+        and isinstance(step.get("run"), str)
+        and squash(step["run"]) == squash(APPLY_GATE_RUN)
+    )
+    return problems if ok else [*problems, APPLY_GATE_MESSAGE]
 
 
 def check_workflow(path: str) -> list[str]:
@@ -453,6 +508,8 @@ def check_workflow(path: str) -> list[str]:
             continue
         problems += [f"{here}: {m}" for m in harden_problems(job, credentialed)]
         problems += [f"{here}: {m}" for m in checkout_problems(job, reusable)]
+        if base == APPLY_FILE and (job_id == "resolve" or credentialed):
+            problems += [f"{here}: {m}" for m in apply_gate_problems(job)]
         gated = family_gated(job.get("if", ""))
         if credentialed and reusable and base not in FAMILY_EXEMPT and not gated:
             problems.append(

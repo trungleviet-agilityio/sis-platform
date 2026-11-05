@@ -1,0 +1,18 @@
+# The P9 check of this repository (ADR 0002 W5, L3): required on every pull request, and weekly so a release or
+# trust change upstream is noticed without a pull request. No credentials and no secrets.
+name: Platform check
+
+on:
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "17 3 * * 1"
+
+permissions: {}
+
+jobs:
+  platform-check:
+    name: platform check
+    permissions:
+      contents: read # the reusable job checks out this repository
+    uses: trungleviet-agilityio/sis-platform/.github/workflows/reusable-platform-check.yml@fedcba9876543210fedcba9876543210fedcba98 # v0.2.0

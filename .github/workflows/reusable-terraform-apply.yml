@@ -1,0 +1,341 @@
+# Reusable Terraform apply of one consumer env (ADR 0002 W2, W4, O9, O11, O13, AA3). Credit: ported from the apply job
+# of ship-it-safely and ship-it-serverless terraform-iac.yml (lab ADR 0004, 0007, 0008).
+#
+# Path frozen (W1): the apply role trusts exactly
+#   trungleviet-agilityio/sis-platform/.github/workflows/reusable-terraform-apply.yml@<sha>
+# for each <sha> in the caller's trusted_workflow_shas (O9). Renaming or moving this file is a major bump.
+# Jobs:
+#   resolve       no credentials. Refuses any event but push and workflow_dispatch (AA3: AWS has no event_name
+#                 condition key) and any ref but main (O1); apply-lambda repeats both before the credential.
+#                 Checks the job context and platform.lock (O11), runs the validator (`lint`, M8), and fails
+#                 when the runtime family has no job here (SUPPORTED_FAMILIES, W2).
+#   apply-lambda  the lambda family (W2). `environment: <env>` (the gate and the environment secret, F29), the apply
+#                 role, `concurrency: tf-<env>` without cancel (W4, H10). Plan, policy lint (T11), apply of that
+#                 saved plan, account-free summary; the plan files are deleted.
+# Caller contract: as reusable-terraform-plan.yml; the caller passes `AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}`
+# (the environment secret, O13) and sets no `environment` key on its own job (W6).
+name: Terraform apply (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      env:
+        description: The env to apply (a key of platform.yaml envs and the GitHub environment name)
+        type: string
+        required: true
+    secrets:
+      AWS_ACCOUNT_ID:
+        description: Account ID of the env (environment secret AWS_ACCOUNT_ID, O13)
+        required: true
+
+permissions: {}
+
+# bash -eo pipefail for every run step: a failing command in a pipe fails the step.
+defaults:
+  run:
+    shell: bash
+
+env:
+  TF_IN_AUTOMATION: "1"
+  TF_INPUT: "0"
+  CHECKPOINT_DISABLE: "1"
+
+jobs:
+  resolve:
+    name: resolve
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      family: ${{ steps.resolve.outputs.family }}
+      region: ${{ steps.resolve.outputs.region }}
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
+        with:
+          egress-policy: audit
+          allowed-endpoints: >
+            github.com:443
+
+      - name: Refuse any event but push and workflow_dispatch, and any ref but main (AA3, O1)
+        env:
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+        run: |
+          case "$EVENT" in
+            push | workflow_dispatch) ;;
+            *) echo "::error::apply runs only on push or workflow_dispatch, not on ${EVENT} (AA3)"; exit 1 ;;
+          esac
+          if [ "$REF" != "refs/heads/main" ]; then
+            echo "::error::apply runs only from refs/heads/main, not from ${REF} (O1)"
+            exit 1
+          fi
+
+      - name: Assert the job runs a sis-platform reusable workflow (O11)
+        env:
+          JOB_REPOSITORY: ${{ job.workflow_repository }}
+          JOB_FILE: ${{ job.workflow_file_path }}
+        run: |
+          if [ "$JOB_REPOSITORY" != "trungleviet-agilityio/sis-platform" ]; then
+            echo "::error::job.workflow_repository is not trungleviet-agilityio/sis-platform"
+            exit 1
+          fi
+          case "$JOB_FILE" in
+            .github/workflows/reusable-*.yml) ;;
+            *) echo "::error::job.workflow_file_path is not a reusable-*.yml workflow"; exit 1 ;;
+          esac
+
+      - name: Check out sis-platform at workflow_sha (closure only)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: trungleviet-agilityio/sis-platform
+          ref: ${{ job.workflow_sha }}
+          path: .platform
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /scripts/release/closure.txt
+            /.github/workflows/reusable-*.yml
+            /scripts/platform/**
+            /scripts/aws/**
+            /scripts/lib.sh
+            /scripts/tf/policy.py
+            /scripts/tf/resolved-sources.sh
+            /intake/sis_intake/**
+            !/intake/sis_intake/__init__.py
+            /intake/schema/**
+            /intake/rules/compat.json
+            /intake/rules/defaults.json
+            /intake/rules/rules.json
+
+      - name: Check out the caller repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: caller
+          persist-credentials: false
+
+      # Trust (job.workflow_sha in trusted_workflow_shas), validator (lint), project.env and the M6 values, before any
+      # credential. --tfvars here is not used later (jobs share no disk): it fails a broken M7 emit before the
+      # environment approval is requested.
+      - name: Resolve the plan
+        id: resolve
+        env:
+          JOB_WORKFLOW_REPOSITORY: ${{ job.workflow_repository }}
+          JOB_WORKFLOW_FILE_PATH: ${{ job.workflow_file_path }}
+          JOB_WORKFLOW_SHA: ${{ job.workflow_sha }}
+          ENV_NAME: ${{ inputs.env }}
+          # The families this workflow has a job for; keep equal to the `if:` gates of the family jobs (W2).
+          SUPPORTED_FAMILIES: lambda
+        run: |
+          python3 -I "$GITHUB_WORKSPACE/.platform/scripts/platform/resolve.py" --caller caller --env "$ENV_NAME" \
+            --tfvars "$RUNNER_TEMP/platform.tfvars.json" --families "$SUPPORTED_FAMILIES" >> "$GITHUB_OUTPUT"
+
+  apply-lambda:
+    name: apply (lambda)
+    needs: resolve
+    if: needs.resolve.outputs.family == 'lambda'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    environment: ${{ inputs.env }}
+    permissions:
+      contents: read
+      id-token: write # OIDC token for the apply role (configure-aws-credentials)
+    # One apply per env at a time, never cancelled midway (W4, H10).
+    concurrency:
+      group: tf-${{ inputs.env }}
+      cancel-in-progress: false
+    env:
+      # Provider installation from the hashicorp namespace only; no implied local mirrors (closure file).
+      TF_CLI_CONFIG_FILE: ${{ github.workspace }}/.platform/scripts/platform/terraformrc
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
+        with:
+          egress-policy: block
+          disable-telemetry: true
+          disable-sudo-and-containers: true
+          allowed-endpoints: >
+            github.com:443
+            releases.hashicorp.com:443
+            registry.terraform.io:443
+            sts.${{ needs.resolve.outputs.region }}.amazonaws.com:443
+            s3.${{ needs.resolve.outputs.region }}.amazonaws.com:443
+            lambda.${{ needs.resolve.outputs.region }}.amazonaws.com:443
+            apigateway.${{ needs.resolve.outputs.region }}.amazonaws.com:443
+            monitoring.${{ needs.resolve.outputs.region }}.amazonaws.com:443
+            sns.${{ needs.resolve.outputs.region }}.amazonaws.com:443
+            api.ecr.${{ needs.resolve.outputs.region }}.amazonaws.com:443
+            logs.${{ needs.resolve.outputs.region }}.amazonaws.com:443
+            secretsmanager.${{ needs.resolve.outputs.region }}.amazonaws.com:443
+            iam.amazonaws.com:443
+
+      - name: Refuse any event but push and workflow_dispatch, and any ref but main (AA3, O1)
+        env:
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+        run: |
+          case "$EVENT" in
+            push | workflow_dispatch) ;;
+            *) echo "::error::apply runs only on push or workflow_dispatch, not on ${EVENT} (AA3)"; exit 1 ;;
+          esac
+          if [ "$REF" != "refs/heads/main" ]; then
+            echo "::error::apply runs only from refs/heads/main, not from ${REF} (O1)"
+            exit 1
+          fi
+
+      - name: Require the AWS_ACCOUNT_ID secret (O13)
+        env:
+          ACCOUNT: ${{ secrets.AWS_ACCOUNT_ID }}
+        run: |
+          if [ -z "$ACCOUNT" ]; then
+            echo "::error::AWS_ACCOUNT_ID is empty: the caller must pass secrets.AWS_ACCOUNT_ID by name (O13)"
+            exit 1
+          fi
+          if ! [[ "$ACCOUNT" =~ ^[0-9]{12}$ ]]; then
+            echo "::error::AWS_ACCOUNT_ID is not a 12-digit account ID"
+            exit 1
+          fi
+
+      - name: Check out sis-platform at workflow_sha (closure only)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: trungleviet-agilityio/sis-platform
+          ref: ${{ job.workflow_sha }}
+          path: .platform
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /scripts/release/closure.txt
+            /.github/workflows/reusable-*.yml
+            /scripts/platform/**
+            /scripts/aws/**
+            /scripts/lib.sh
+            /scripts/tf/policy.py
+            /scripts/tf/resolved-sources.sh
+            /intake/sis_intake/**
+            !/intake/sis_intake/__init__.py
+            /intake/schema/**
+            /intake/rules/compat.json
+            /intake/rules/defaults.json
+            /intake/rules/rules.json
+
+      - name: Check out the caller repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: caller
+          persist-credentials: false
+
+      - name: Resolve the plan
+        id: resolve
+        env:
+          JOB_WORKFLOW_REPOSITORY: ${{ job.workflow_repository }}
+          JOB_WORKFLOW_FILE_PATH: ${{ job.workflow_file_path }}
+          JOB_WORKFLOW_SHA: ${{ job.workflow_sha }}
+          ENV_NAME: ${{ inputs.env }}
+          GATE_REGION: ${{ needs.resolve.outputs.region }}
+        run: |
+          out="$(python3 -I "$GITHUB_WORKSPACE/.platform/scripts/platform/resolve.py" --caller caller \
+            --env "$ENV_NAME" --tfvars "$RUNNER_TEMP/platform.tfvars.json")"
+          if ! grep -qxF "region=${GATE_REGION}" <<<"$out"; then
+            echo "::error::the region differs from the resolve job's region (egress list)"
+            exit 1
+          fi
+          printf '%s\n' "$out" >> "$GITHUB_OUTPUT"
+
+      - name: Install terraform (checksum verified)
+        run: |
+          "$GITHUB_WORKSPACE/.platform/scripts/platform/install-terraform.sh" "$RUNNER_TEMP/bin"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+
+      # Before any credential: providers from the hashicorp namespace only (TF_CLI_CONFIG_FILE), init without the
+      # backend, then what init really resolved (local or sis-platform at release_sha, AB4), then validate.
+      - name: Terraform init without backend, resolved sources, validate (no credentials)
+        working-directory: caller
+        env:
+          ENV_NAME: ${{ steps.resolve.outputs.env }}
+          RELEASE_SHA: ${{ steps.resolve.outputs.release_sha }}
+          TF_DATA_DIR: ${{ runner.temp }}/tf-data
+        run: '"$GITHUB_WORKSPACE/.platform/scripts/platform/tf-init.sh" sources'
+
+      # S1: a re-run of an old run would apply a stale commit. The caller repo is public (F30), so an anonymous
+      # ls-remote over github.com (already on the egress list) reads the main tip.
+      - name: Refuse a commit that is not the current main tip (stale re-run)
+        env:
+          REPO: ${{ github.repository }}
+          RUN_SHA: ${{ github.sha }}
+          GIT_TERMINAL_PROMPT: "0"
+        run: |
+          refs="$(git ls-remote --heads "https://github.com/${REPO}.git" refs/heads/main)"
+          # Exactly the ref refs/heads/main; anything but one 40-hex value fails closed.
+          tip="$(printf '%s\n' "$refs" | awk '$2 == "refs/heads/main" {print $1}')"
+          if ! [[ "$tip" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::cannot read the main tip of ${REPO}"
+            exit 1
+          fi
+          if [ "$tip" != "$RUN_SHA" ]; then
+            echo "::error::this run is for ${RUN_SHA}, but main is now at ${tip}: refusing a stale apply"
+            exit 1
+          fi
+
+      - name: Assume the apply role
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/${{ steps.resolve.outputs.apply_role }}
+          aws-region: ${{ needs.resolve.outputs.region }}
+          role-session-name: gha-apply-${{ github.run_id }}-${{ github.run_attempt }}
+          mask-aws-account-id: true
+          retry-max-attempts: 3
+
+      # The backend composed at run time (T3), then resolved-sources.sh again on what this init resolved.
+      - name: Terraform init with the backend
+        working-directory: caller
+        env:
+          ACCOUNT: ${{ secrets.AWS_ACCOUNT_ID }}
+          ENV_NAME: ${{ steps.resolve.outputs.env }}
+          REGION: ${{ steps.resolve.outputs.region }}
+          PREFIX: ${{ steps.resolve.outputs.prefix }}
+          RELEASE_SHA: ${{ steps.resolve.outputs.release_sha }}
+          TF_DATA_DIR: ${{ runner.temp }}/tf-data
+        run: '"$GITHUB_WORKSPACE/.platform/scripts/platform/tf-init.sh" backend'
+
+      - name: Terraform plan
+        working-directory: caller
+        env:
+          ENV_NAME: ${{ steps.resolve.outputs.env }}
+          TF_DATA_DIR: ${{ runner.temp }}/tf-data
+        # Raw output stays in a file; a failure prints it with account-like runs redacted (tf-run.sh).
+        run: |
+          "$GITHUB_WORKSPACE/.platform/scripts/platform/tf-run.sh" plan -chdir="infra/envs/$ENV_NAME" plan \
+            -input=false -no-color -lock-timeout=5m -var-file="$RUNNER_TEMP/platform.tfvars.json" \
+            -out="$RUNNER_TEMP/tfplan"
+
+      # The lint runs on the exact plan that is applied next (T11).
+      - name: Policy lint and account-free summary
+        working-directory: caller
+        env:
+          ACCOUNT: ${{ secrets.AWS_ACCOUNT_ID }}
+          ENV_NAME: ${{ steps.resolve.outputs.env }}
+          PREFIX: ${{ steps.resolve.outputs.prefix }}
+          TF_DATA_DIR: ${{ runner.temp }}/tf-data
+        run: |
+          "$GITHUB_WORKSPACE/.platform/scripts/platform/tf-run.sh" show --out "$RUNNER_TEMP/tfplan.json" \
+            -chdir="infra/envs/$ENV_NAME" show -json "$RUNNER_TEMP/tfplan"
+          python3 -I "$GITHUB_WORKSPACE/.platform/scripts/tf/policy.py" "$RUNNER_TEMP/tfplan.json" --allow-no-policy \
+            --boundary-arn "arn:aws:iam::${ACCOUNT}:policy/${PREFIX}-${ENV_NAME}-workload-boundary"
+          "$GITHUB_WORKSPACE/.platform/scripts/platform/plan-summary.sh" --title "Terraform apply (${ENV_NAME})" \
+            < "$RUNNER_TEMP/tfplan.json" | "$GITHUB_WORKSPACE/.platform/scripts/aws/assert-no-account-id.sh" \
+            >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Terraform apply of the saved plan
+        working-directory: caller
+        env:
+          ENV_NAME: ${{ steps.resolve.outputs.env }}
+          TF_DATA_DIR: ${{ runner.temp }}/tf-data
+        run: |
+          "$GITHUB_WORKSPACE/.platform/scripts/platform/tf-run.sh" apply -chdir="infra/envs/$ENV_NAME" apply \
+            -input=false -no-color -lock-timeout=5m "$RUNNER_TEMP/tfplan"
+
+      - name: Remove the plan files
+        if: always()
+        run: rm -f "$RUNNER_TEMP/tfplan" "$RUNNER_TEMP/tfplan.json" "$RUNNER_TEMP/platform.tfvars.json"

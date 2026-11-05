@@ -1,0 +1,27 @@
+name: decoy AA3 gate that exits 0 before its checks
+on:
+  workflow_call:
+permissions: {}
+jobs:
+  resolve:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
+        with:
+          egress-policy: audit
+      - name: decoy gate
+        env:
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+        run: |
+          exit 0
+          case "$EVENT" in
+            push | workflow_dispatch) ;;
+            *) echo "::error::apply runs only on push or workflow_dispatch, not on ${EVENT} (AA3)"; exit 1 ;;
+          esac
+          if [ "$REF" != "refs/heads/main" ]; then
+            echo "::error::apply runs only from refs/heads/main, not from ${REF} (O1)"
+            exit 1
+          fi

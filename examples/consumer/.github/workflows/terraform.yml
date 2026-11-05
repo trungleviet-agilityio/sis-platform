@@ -1,0 +1,56 @@
+# Thin caller of the sis-platform Terraform workflows (ADR 0002 W3, W4, W6, O13, O14). Everything else lives in the
+# reusable workflows, pinned to platform.lock workflow_sha with the lock version as the comment (L3).
+#   pull request          plan dev (repo secret AWS_ACCOUNT_ID_DEV) and a sticky comment; prod is never planned on a PR
+#   push to main          apply dev, gated by the dev environment
+#   workflow_dispatch env apply that env (prod at checkpoint step 8), gated by its environment
+# The caller jobs set no `environment` (F29): the reusable apply job does. No `secrets: inherit`.
+# Their concurrency groups differ from the reusable jobs' groups (tf-<env>), which avoids a concurrency deadlock.
+name: Terraform
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      env:
+        description: Env to apply
+        type: choice
+        options: [dev, prod]
+        required: true
+        default: dev
+
+permissions: {}
+
+jobs:
+  plan-dev:
+    name: plan dev
+    if: github.event_name == 'pull_request'
+    permissions:
+      contents: read # the reusable jobs check out this repository
+      id-token: write # the plan role (OIDC)
+      pull-requests: write # the sticky plan comment
+    concurrency:
+      group: caller-plan-dev-${{ github.ref }}
+      cancel-in-progress: false
+    uses: trungleviet-agilityio/sis-platform/.github/workflows/reusable-terraform-plan.yml@fedcba9876543210fedcba9876543210fedcba98 # v0.2.0
+    with:
+      env: dev
+    secrets:
+      AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID_DEV }}
+
+  apply:
+    name: apply ${{ inputs.env || 'dev' }}
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    permissions:
+      contents: read # the reusable jobs check out this repository
+      id-token: write # the apply role (OIDC)
+    concurrency:
+      group: caller-apply-${{ inputs.env || 'dev' }}
+      cancel-in-progress: false
+    uses: trungleviet-agilityio/sis-platform/.github/workflows/reusable-terraform-apply.yml@fedcba9876543210fedcba9876543210fedcba98 # v0.2.0
+    with:
+      env: ${{ inputs.env || 'dev' }}
+    secrets:
+      AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
