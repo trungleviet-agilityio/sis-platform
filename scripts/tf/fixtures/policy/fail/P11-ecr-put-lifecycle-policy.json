@@ -1,0 +1,18 @@
+{
+  "documents": [
+    {
+      "name": "P11-ecr-put-lifecycle-policy",
+      "policy": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Action": "ecr:PutLifecyclePolicy",
+            "Resource": "arn:aws:ecr:ap-southeast-1:123456789012:repository/sis-dev-app"
+          }
+        ]
+      }
+    }
+  ],
+  "boundary_arn": "arn:aws:iam::123456789012:policy/sis-dev-workload-boundary"
+}

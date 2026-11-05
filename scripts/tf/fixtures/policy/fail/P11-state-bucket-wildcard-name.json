@@ -1,0 +1,18 @@
+{
+  "documents": [
+    {
+      "name": "P11-state-bucket-wildcard-name",
+      "policy": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Action": "s3:PutBucketVersioning",
+            "Resource": "arn:aws:s3:::sis-dev-*"
+          }
+        ]
+      }
+    }
+  ],
+  "boundary_arn": "arn:aws:iam::123456789012:policy/sis-dev-workload-boundary"
+}

@@ -1,0 +1,28 @@
+{
+  "documents": [
+    {
+      "name": "create-role-with-boundary",
+      "policy": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Action": [
+              "iam:CreateRole",
+              "iam:PutRolePolicy",
+              "iam:AttachRolePolicy",
+              "iam:PutRolePermissionsBoundary"
+            ],
+            "Resource": "arn:aws:iam::123456789012:role/sis-dev-app-*",
+            "Condition": {
+              "StringEquals": {
+                "iam:PermissionsBoundary": "arn:aws:iam::123456789012:policy/sis-dev-workload-boundary"
+              }
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "boundary_arn": "arn:aws:iam::123456789012:policy/sis-dev-workload-boundary"
+}

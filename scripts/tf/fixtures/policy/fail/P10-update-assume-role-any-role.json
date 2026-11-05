@@ -1,0 +1,18 @@
+{
+  "documents": [
+    {
+      "name": "P10-update-assume-role-any-role",
+      "policy": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Action": "iam:UpdateAssumeRolePolicy",
+            "Resource": "arn:aws:iam::123456789012:role/*"
+          }
+        ]
+      }
+    }
+  ],
+  "boundary_arn": "arn:aws:iam::123456789012:policy/sis-dev-workload-boundary"
+}
