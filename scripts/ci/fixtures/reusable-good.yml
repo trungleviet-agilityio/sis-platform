@@ -1,0 +1,50 @@
+name: reusable
+on:
+  workflow_call:
+    secrets:
+      AWS_ACCOUNT_ID:
+        required: true
+permissions: {}
+jobs:
+  resolve:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    outputs:
+      family: ${{ steps.r.outputs.family }}
+    steps:
+      - uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
+        with:
+          egress-policy: audit
+      - id: r
+        run: echo family=lambda >> "$GITHUB_OUTPUT"
+  plan-lambda:
+    needs: resolve
+    if: needs.resolve.outputs.family == 'lambda'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      id-token: write
+    concurrency:
+      group: tf
+      cancel-in-progress: false
+    steps:
+      - uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
+        with:
+          egress-policy: block
+          disable-telemetry: true
+          disable-sudo-and-containers: true
+          allowed-endpoints: >
+            github.com:443
+            sts.eu-west-1.amazonaws.com:443
+            ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ needs.resolve.outputs.region }}.amazonaws.com:443
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: trungleviet-agilityio/sis-platform
+          ref: ${{ job.workflow_sha }}
+          path: .platform
+          persist-credentials: false
+          sparse-checkout: |
+            scripts/platform
+          sparse-checkout-cone-mode: false
+      - uses: aws-actions/configure-aws-credentials@0000000000000000000000000000000000000001 # v5.0.0

@@ -1,0 +1,16 @@
+name: reusable bad dot platform
+on:
+  workflow_call:
+permissions: {}
+jobs:
+  a:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
+        with:
+          egress-policy: audit
+      - run: |
+          cd .platform
+          scripts/platform/a.py

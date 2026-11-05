@@ -1,0 +1,23 @@
+name: consumer good
+on:
+  workflow_dispatch:
+    inputs:
+      env:
+        type: choice
+        options: [dev, prod]
+      sha:
+        type: string
+      digest:
+        type: string
+permissions: {}
+jobs:
+  plan:
+    permissions:
+      contents: read
+      id-token: write
+    concurrency:
+      group: tf-dev
+      cancel-in-progress: false
+    uses: trungleviet-agilityio/sis-platform/.github/workflows/reusable-terraform-plan.yml@0000000000000000000000000000000000000002 # v0.2.0
+    secrets:
+      AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
