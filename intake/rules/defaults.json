@@ -1,0 +1,52 @@
+{
+  "version": 1,
+  "arch": "arm64",
+  "arch_note": "arm64 is the default for new apps (owner answer Q4); the two lab examples keep x86_64.",
+  "runtimes": {
+    "lambda-web": {
+      "front_door": "http-api",
+      "release_strategy": "all-at-once",
+      "network": "No VPC. If a DB needs a VPC: S3/DynamoDB gateway endpoints (free) plus only the interface endpoints needed; no NAT",
+      "dr": "backup-restore (IaC + ECR + state); pilot-light = ECR cross-region replication + IaC in a second region",
+      "cost": "arm64 for new apps; HTTP API throttle as cost ceiling (Function URL when budget-first; CloudFront + WAF only when public and abuse-prone); Compute Savings Plan only when steady prod spend is known",
+      "sustainability": "Scale to zero by design; arm64 (SUS05-BP02)"
+    },
+    "lambda-events": {
+      "front_door": "none",
+      "release_strategy": "all-at-once",
+      "network": "No VPC. If a DB needs a VPC: S3/DynamoDB gateway endpoints (free) plus only the interface endpoints needed; no NAT",
+      "dr": "backup-restore (IaC + ECR + state); pilot-light = ECR cross-region replication + IaC in a second region",
+      "cost": "arm64 for new apps; Compute Savings Plan only when steady prod spend is known",
+      "sustainability": "Scale to zero by design; arm64 (SUS05-BP02)"
+    },
+    "ecs-fargate": {
+      "front_door": "alb",
+      "release_strategy": "rolling",
+      "network": "Private subnets + VPC endpoints when few AZs and low egress; NAT when egress is broad (ask egress needs, COST08)",
+      "dr": "backup-restore; warm-standby = scaled-down service in a second region",
+      "cost": "arm64, Fargate Spot in dev only, Savings Plan for steady prod",
+      "sustainability": "dev desired count 0 or destroy after the session"
+    },
+    "ec2-asg": {
+      "front_door": "alb",
+      "release_strategy": "rolling",
+      "network": "Private + NAT or SSM endpoints",
+      "dr": "AMI + launch template in a second region (pilot light)",
+      "cost": "Graviton, Savings Plans, Spot in dev",
+      "sustainability": "Right-size with Compute Optimizer; ASG min 0 in dev"
+    },
+    "eks-workload": {
+      "front_door": "alb",
+      "release_strategy": "rolling",
+      "network": "Shared cluster VPC; ALB via the Load Balancer Controller",
+      "dr": "GitOps re-sync to a second cluster",
+      "cost": "Shared cluster to amortize the control plane; Karpenter with Spot in dev",
+      "sustainability": "Bin-packing on the shared cluster; arm64 node pools"
+    }
+  },
+  "release": {"rollback": "manual", "engine": "auto"},
+  "workload": {"shape": "web"},
+  "ci": {"provider": "github-actions"},
+  "dr": {"strategy": "backup-restore"},
+  "delivery": "push"
+}
