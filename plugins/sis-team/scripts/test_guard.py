@@ -68,7 +68,10 @@ BLOCKED_CASES = [
     ("gh auth refresh -s project", "gh sign-in, scopes or token"),
     ("gh project delete 3 --owner me", "GitHub Project deletion"),
     # gh api writes, including the deployment approval path
-    ("gh api -X POST repos/o/r/actions/runs/1/pending_deployments -f state=approved", "gh api write"),
+    (
+        "gh api -X POST repos/o/r/actions/runs/1/pending_deployments -f state=approved",
+        "gh api write",
+    ),
     ("gh api --method=PUT repos/o/r/actions/secrets/X --input body.json", "gh api write"),
     ("gh api repos/o/r/environments/dev -XDELETE", "gh api write"),
     ("gh api repos/o/r/rulesets/1 -f enforcement=disabled", "gh api write"),
@@ -148,7 +151,8 @@ class AllowedCommands(unittest.TestCase):
                 self.assertEqual(done.stderr, "")
 
 
-# Credential-shaped test values are assembled at run time so this file holds no literal for gitleaks.
+# Credential-shaped test values are assembled at run time so this file holds no literal for
+# gitleaks.
 FAKE_AWS_KEY = "AK" + "IA" + "ABCDEFGHIJKLMNOP"
 FAKE_GH_PAT = "gh" + "p_" + "a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8"
 FAKE_FINE_PAT = "github" + "_pat_" + "11ABCDEFG0abcdefghijkl_mnopqrstuvwxyz0123456789"
@@ -158,7 +162,10 @@ FAKE_PEM = "-----BEGIN " + "RSA PRIVATE KEY-----"
 S2_COMMAND_CASES = [
     # credential literals in a command
     (f"aws s3 ls --access-key {FAKE_AWS_KEY}", "credential literal (AWS access key ID)"),
-    (f"curl -H 'Authorization: token {FAKE_GH_PAT}' https://api.github.com", "credential literal (GitHub token)"),
+    (
+        f"curl -H 'Authorization: token {FAKE_GH_PAT}' https://api.github.com",
+        "credential literal (GitHub token)",
+    ),
     (f"git clone https://{FAKE_FINE_PAT}@github.com/o/r.git", "credential literal (GitHub token)"),
     (f"echo '{FAKE_PEM}' > k", "credential literal (private key)"),
     # board project items are never deleted
@@ -172,7 +179,7 @@ S2_COMMAND_CASES = [
     ("GH_TOKEN=abc gh project item-list 3", "inline GitHub token"),
     ("export GH_TOKEN=abc", "inline GitHub token"),
     ("env GITHUB_TOKEN=abc gh issue list", "inline GitHub token"),
-    ("cd x && GITHUB_TOKEN=\"$T\" gh pr view 1", "inline GitHub token"),
+    ('cd x && GITHUB_TOKEN="$T" gh pr view 1', "inline GitHub token"),
 ]
 
 S2_ALLOWED = [
@@ -208,7 +215,9 @@ class S2Commands(unittest.TestCase):
         self.assertNotIn(FAKE_AWS_KEY, done.stderr)
 
 
-def write(tool: str, path: str, cwd: str, key: str = "file_path") -> subprocess.CompletedProcess[str]:
+def write(
+    tool: str, path: str, cwd: str, key: str = "file_path"
+) -> subprocess.CompletedProcess[str]:
     return run({"tool_name": tool, "tool_input": {key: path, "content": "x"}, "cwd": cwd})
 
 
@@ -306,7 +315,9 @@ class PathScope(unittest.TestCase):
             with self.subTest(command=command):
                 done = bash_run(command, cwd=self.root)
                 self.assertEqual(done.returncode, 2)
-                self.assertIn("sis-team guard blocked this call (rm -r outside the repo", done.stderr)
+                self.assertIn(
+                    "sis-team guard blocked this call (rm -r outside the repo", done.stderr
+                )
 
     def test_rm_grammar_cannot_hide_a_recursive_delete(self) -> None:
         for command in [
@@ -441,7 +452,7 @@ GRAMMAR_ALLOWED = [
     'git commit -m "docs: mention gh pr merge is blocked"',
     "git commit -m 'terraform apply and git push origin main are blocked'",
     "git commit -F - <<'EOF'\nfeat: gh pr merge is blocked\n\nbody: terraform apply\nEOF",
-    'git commit -m "$(cat <<\'EOF\'\nfeat: x\n\nbody mentions gh api -X POST\nEOF\n)"',
+    "git commit -m \"$(cat <<'EOF'\nfeat: x\n\nbody mentions gh api -X POST\nEOF\n)\"",
     'echo "gh pr merge"',
     'gh pr comment 1 --body "please do not gh pr merge yet"',
     "gh auth status",
@@ -594,9 +605,9 @@ class ShellInputAndReleases(unittest.TestCase):
 class FailClosed(unittest.TestCase):
     def run_main(self, event: Mapping[str, object]) -> tuple[int, str]:
         err = io.StringIO()
-        with mock.patch("sys.stdin", io.StringIO(json.dumps(event))):
-            with contextlib.redirect_stderr(err):
-                code = guard.main()
+        stdin = mock.patch("sys.stdin", io.StringIO(json.dumps(event)))
+        with stdin, contextlib.redirect_stderr(err):
+            code = guard.main()
         return code, err.getvalue()
 
     def test_error_blocks_bash_and_write_tools(self) -> None:
@@ -633,7 +644,7 @@ class ScratchAndRoots(unittest.TestCase):
             os.chmod(wide, 0o777)  # noqa: S103  # the unsafe case under test
             group = os.path.join(base, "group")
             os.mkdir(group)
-            os.chmod(group, 0o770)
+            os.chmod(group, 0o770)  # noqa: S103  # group-writable case under test
             real = os.path.join(base, "real")
             os.mkdir(real, 0o700)
             link = os.path.join(base, "link")
@@ -667,17 +678,19 @@ class ScratchAndRoots(unittest.TestCase):
     def test_extra_roots_refuse_broad_directories(self) -> None:
         home = os.path.realpath(os.path.expanduser("~"))
         for value in ("/", home, "/tmp", "/private/tmp", "~"):  # noqa: S108
-            with self.subTest(value=value), mock.patch.dict(os.environ, {"SIS_GUARD_EXTRA_ROOTS": value}):
+            patched = mock.patch.dict(os.environ, {"SIS_GUARD_EXTRA_ROOTS": value})
+            with self.subTest(value=value), patched:
                 self.assertEqual(guard.extra_roots(), [])
         with tempfile.TemporaryDirectory() as base:
-            with mock.patch.dict(os.environ, {"SIS_GUARD_EXTRA_ROOTS": base}):
+            env = mock.patch.dict(os.environ, {"SIS_GUARD_EXTRA_ROOTS": base})
+            with env:
                 self.assertEqual(guard.extra_roots(), [os.path.realpath(base)])
 
     def test_no_repo_in_home_or_root_gives_no_root(self) -> None:
         with tempfile.TemporaryDirectory() as base:
             fake_home = os.path.realpath(base)
             failed = subprocess.CompletedProcess([], 128, "", "")
-            run_patch = mock.patch.object(guard.subprocess, "run", return_value=failed)
+            run_patch = mock.patch.object(subprocess, "run", return_value=failed)
             home_patch = mock.patch.object(guard, "_norm_home", return_value=fake_home)
             with run_patch, home_patch:
                 self.assertEqual(guard.repo_root(fake_home), "")
@@ -714,7 +727,9 @@ class FileTools(unittest.TestCase):
                     [sys.executable, GUARD], input=raw, capture_output=True, text=True, check=False
                 )
                 self.assertEqual(done.returncode, 2)
-                self.assertIn("sis-team guard blocked this call (malformed hook input)", done.stderr)
+                self.assertIn(
+                    "sis-team guard blocked this call (malformed hook input)", done.stderr
+                )
 
 
 if __name__ == "__main__":

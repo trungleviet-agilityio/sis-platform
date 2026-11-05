@@ -99,7 +99,7 @@ def names(payload: Any, key: str) -> List[str]:
 
 
 def check_repo(base: str, need_public: bool, rep: Report) -> Dict[str, Any]:
-    repo = api_get(base)
+    repo: Dict[str, Any] = api_get(base)
     if repo.get("private") or repo.get("visibility", "public") != "public":
         msg = (
             "repository is private (visibility %s); required reviewers need a public repo "
