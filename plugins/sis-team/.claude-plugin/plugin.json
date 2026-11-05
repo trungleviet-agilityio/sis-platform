@@ -1,7 +1,7 @@
 {
   "name": "sis-team",
   "displayName": "SIS Team",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Plan, Build and Verify agents for shipping on AWS with Terraform and GitHub Actions: architect, backend and devops builders, e2e, reviewer, security reviewer, simplifier, and a guard hook",
   "author": {
     "name": "Trung Le",
