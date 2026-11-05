@@ -1,0 +1,9 @@
+# expect: V08
+schema_version: 1
+project: {name: demo-app, prefix: demo, owner: demo-team}
+platform: {version: v0.2.0}
+workload: {shape: web, needs: [websockets]}
+runtime: {kind: lambda-web}
+budget: {monthly_usd: 20}
+envs:
+  dev: {tier: nonprod, account: dev, region: ap-southeast-1}

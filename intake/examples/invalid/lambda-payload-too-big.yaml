@@ -1,8 +1,9 @@
 # expect: V08
 schema_version: 1
-project: {name: demo-app, prefix: demo}
-platform: {version: v0.1.0}
+project: {name: demo-app, prefix: demo, owner: demo-team}
+platform: {version: v0.2.0}
 workload: {shape: web, max_payload_mb: 10}
 runtime: {kind: lambda-web}
+budget: {monthly_usd: 20}
 envs:
-  dev: {account: dev, region: ap-southeast-1}
+  dev: {tier: nonprod, account: dev, region: ap-southeast-1}

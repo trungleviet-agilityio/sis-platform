@@ -16,23 +16,32 @@ def base_manifest() -> dict[str, Any]:
     """A valid lambda-web manifest with no rule findings other than V17."""
     return {
         "schema_version": 1,
-        "project": {"name": "demo", "prefix": "dm"},
-        "platform": {"version": "v0.1.0"},
+        "project": {"name": "demo", "prefix": "dm", "owner": "demo-team"},
+        "platform": {"version": "v0.2.0"},
         "workload": {
             "shape": "web",
             "port": 8080,
             "health_path": "/health",
             "max_duration_seconds": 10,
             "max_payload_mb": 1,
+            "peak_rps": 50,
+            "p95_ms": 500,
         },
         "runtime": {"kind": "lambda-web", "arch": "arm64", "front_door": "http-api"},
         "ci": {"provider": "github-actions"},
         "budget": {"monthly_usd": 50},
         "dr": {"strategy": "backup-restore", "rto_minutes": 240, "rpo_minutes": 1440},
+        "compliance": {"data_class": "internal"},
         "database": {"kind": "none"},
         "envs": {
-            "dev": {"account": "dev", "region": "ap-southeast-1", "delivery": "push"},
+            "dev": {
+                "tier": "nonprod",
+                "account": "dev",
+                "region": "ap-southeast-1",
+                "delivery": "push",
+            },
             "prod": {
+                "tier": "prod",
                 "account": "prod",
                 "region": "ap-southeast-1",
                 "delivery": "push",
@@ -60,8 +69,8 @@ def eks_manifest() -> dict[str, Any]:
     return m
 
 
-def fired(manifest: dict[str, Any], compat: Any = None) -> set[str]:
-    return {f.id for f in rules.evaluate(manifest, compat=compat)}
+def fired(manifest: dict[str, Any], compat: Any = None, **kwargs: Any) -> set[str]:
+    return {f.id for f in rules.evaluate(manifest, compat=compat, **kwargs)}
 
 
 def copy_of(value: Any) -> Any:

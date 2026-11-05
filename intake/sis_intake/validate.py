@@ -1,7 +1,13 @@
-"""Validate a platform.yaml manifest.
+"""Validate a platform.yaml manifest and print findings or the resolved plan.
 
-    python3 intake/sis_intake/validate.py FILE [--json]
-    python3 -m sis_intake.validate FILE [--json]      (from intake/)
+    python3 intake/sis_intake/validate.py FILE|- [--json] [--context lint|deploy]
+    python3 intake/sis_intake/validate.py FILE|- --emit tfvars --env ENV
+    python3 -m sis_intake.validate FILE|- ...                  (from intake/)
+
+`-` reads the manifest from stdin. `--json` prints the resolved plan (ADR 0002 M6) and always prints
+JSON, including a PARSE finding when the input cannot be read. `--context deploy` turns V17 into an
+error (M8). `--emit tfvars --env ENV` prints `{"platform": {...}}` for one env (M7), and prints
+nothing when the manifest has errors.
 
 Exit codes: 0 valid (warnings printed), 1 errors, 2 parse or usage error.
 """
@@ -11,30 +17,41 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 # Run as a script path, sys.path[0] is sis_intake/ itself: add its parent so the package imports.
 _PARENT = str(Path(__file__).resolve().parent.parent)
 if _PARENT not in sys.path:
     sys.path.insert(0, _PARENT)
 
-from sis_intake import rules, schema, yamlsubset  # noqa: E402
+from sis_intake import plan, rules, schema, yamlsubset  # noqa: E402
 
 SCHEMA_PATH = Path(__file__).resolve().parent.parent / "schema" / "platform.schema.json"
+MAX_INPUT_BYTES = 1024 * 1024
+USAGE = (
+    "usage: validate.py FILE|- [--json] [--context lint|deploy]\n"
+    "       validate.py FILE|- --emit tfvars --env ENV\n"
+)
 
 
 class Report:
     def __init__(
         self,
         findings: list[rules.Finding],
-        resolved: dict[str, dict[str, Any]],
-        defaults: dict[str, Any] | None,
+        manifest: dict[str, Any] | None,
+        context: str,
+        resolvable: bool,
         parse_error: bool,
     ) -> None:
-        self.findings = findings
-        self.resolved = resolved
-        self.defaults = defaults
+        # No output ever carries an account-ID-like run, not even an echoed bad value.
+        self.findings = [
+            f._replace(path=rules.redact(f.path), message=rules.redact(f.message)) for f in findings
+        ]
+        self.manifest = manifest
+        self.context = context
+        self.resolvable = resolvable
         self.parse_error = parse_error
+        self._plan: dict[str, Any] | None = None
 
     @property
     def errors(self) -> list[rules.Finding]:
@@ -54,18 +71,35 @@ class Report:
             return 2
         return 1 if self.errors else 0
 
+    @property
+    def plan(self) -> dict[str, Any]:
+        if self._plan is None:
+            built = plan.build_plan(self.manifest, self.findings, self.context, self.resolvable)
+            self._plan = rules.redact_obj(built)
+        return self._plan
+
+    @property
+    def envs(self) -> dict[str, Any]:
+        envs: dict[str, Any] = self.plan["envs"]
+        return envs
+
 
 def _meta(rule_id: str, path: str, message: str) -> rules.Finding:
     return rules.Finding(rule_id, "error", path, message, [], [])
 
 
-def validate_text(text: str) -> Report:
+def parse_failure(path: str, message: str, context: str = "lint") -> Report:
+    """A report for input that could not be read or parsed (exit 2)."""
+    return Report([_meta("PARSE", path, message)], None, context, False, True)
+
+
+def validate_text(text: str, context: str = "lint") -> Report:
     try:
         manifest = yamlsubset.parse(text)
     except yamlsubset.YamlError as exc:
-        return Report([_meta("PARSE", f"line {exc.line}", exc.message)], {}, None, True)
+        return parse_failure(f"line {exc.line}", exc.message, context)
     if not isinstance(manifest, dict):
-        return Report([_meta("PARSE", "(root)", "the document must be a mapping")], {}, None, True)
+        return parse_failure("(root)", "the document must be a mapping", context)
 
     with open(SCHEMA_PATH, encoding="utf-8") as handle:
         schema_doc = json.load(handle)
@@ -73,26 +107,18 @@ def validate_text(text: str) -> Report:
         _meta("SCHEMA", issue.path or "(root)", issue.message)
         for issue in schema.validate(manifest, schema_doc)
     ]
-    if isinstance(manifest.get("envs"), dict) and not manifest["envs"]:
-        findings.append(_meta("SCHEMA", "envs", "at least one env is required"))
     if findings:
         # The manifest is not well formed: only the structure-free scan (V10) is safe to run.
-        findings.extend(rules.evaluate(manifest, only={"V10"}))
-        return Report(findings, {}, None, False)
+        findings.extend(rules.evaluate(manifest, only={"V10"}, context=context, raw_text=text))
+        return Report(findings, manifest, context, False, False)
 
-    findings.extend(rules.evaluate(manifest))
-    defaults = rules.load_defaults()
-    return Report(
-        findings,
-        rules.resolve_envs(manifest, defaults=defaults),
-        defaults["runtimes"][manifest["runtime"]["kind"]],
-        False,
-    )
+    findings.extend(rules.evaluate(manifest, context=context, raw_text=text))
+    return Report(findings, manifest, context, True, False)
 
 
-def validate_file(path: str) -> Report:
+def validate_file(path: str, context: str = "lint") -> Report:
     with open(path, encoding="utf-8") as handle:
-        return validate_text(handle.read())
+        return validate_text(handle.read(), context)
 
 
 def _render_text(report: Report) -> str:
@@ -101,10 +127,10 @@ def _render_text(report: Report) -> str:
         refs = ", ".join(f.pillars + f.wa_refs)
         suffix = f" [{refs}]" if refs else ""
         out.append(f"{f.severity:<7} {f.id:<6} {f.path}: {f.message}{suffix}")
-    if report.resolved:
+    if report.resolvable and report.manifest is not None and report.valid:
         out.append("")
         out.append("resolved:")
-        for name, info in report.resolved.items():
+        for name, info in rules.resolve_envs(report.manifest).items():
             out.append(
                 "  {}: strategy={} engine={} deploy_role_profile={} "
                 "front_door={} rollback={}".format(
@@ -116,39 +142,122 @@ def _render_text(report: Report) -> str:
                     info["rollback"],
                 )
             )
-    if report.defaults:
         out.append("runtime defaults:")
-        for key, value in report.defaults.items():
+        for key, value in rules.load_defaults()["runtimes"][
+            report.manifest["runtime"]["kind"]
+        ].items():
             out.append(f"  {key}: {value}")
     out.append("")
     out.append(f"{len(report.errors)} error(s), {len(report.warnings)} warning(s)")
     return "\n".join(out)
 
 
+class Options(NamedTuple):
+    source: str
+    as_json: bool
+    context: str
+    emit: str | None
+    env: str | None
+
+
+def _parse_args(args: list[str]) -> tuple[Options | None, str]:
+    """The options, or None and a usage problem."""
+    as_json = False
+    context = "lint"
+    emit: str | None = None
+    env: str | None = None
+    positional: list[str] = []
+    index = 0
+    while index < len(args):
+        arg = args[index]
+        if arg == "--json":
+            as_json = True
+        elif arg in ("--context", "--emit", "--env"):
+            index += 1
+            if index >= len(args):
+                return None, f"{arg} needs a value"
+            value = args[index]
+            if arg == "--context":
+                context = value
+            elif arg == "--emit":
+                emit = value
+            else:
+                env = value
+        elif arg.startswith("-") and arg != "-":
+            return None, f"unknown option {arg}"
+        else:
+            positional.append(arg)
+        index += 1
+    if len(positional) != 1:
+        return None, "expected exactly one FILE (or - for stdin)"
+    if context not in rules.CONTEXTS:
+        return None, "--context must be lint or deploy"
+    if emit is not None and emit != "tfvars":
+        return None, "--emit supports only tfvars"
+    if emit is not None and (env is None or as_json):
+        return None, "--emit tfvars needs --env ENV and cannot be combined with --json"
+    if emit is None and env is not None:
+        return None, "--env is only used with --emit tfvars"
+    return Options(positional[0], as_json, context, emit, env), ""
+
+
+class TooLargeError(Exception):
+    """The input is over MAX_INPUT_BYTES."""
+
+
+def _read(source: str) -> str:
+    if source == "-":
+        data = sys.stdin.buffer.read(MAX_INPUT_BYTES + 1)
+    else:
+        with open(source, "rb") as handle:
+            data = handle.read(MAX_INPUT_BYTES + 1)
+    if len(data) > MAX_INPUT_BYTES:
+        raise TooLargeError
+    return data.decode("utf-8")
+
+
+def _fail(report: Report, as_json: bool, usage: str = "") -> int:
+    if usage:
+        sys.stderr.write(usage)
+    if as_json:
+        sys.stdout.write(json.dumps(report.plan, indent=2) + "\n")
+    else:
+        sys.stderr.write(_render_text(report) + "\n" if not usage else "")
+    return report.exit_code
+
+
 def main(argv: list[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
-    as_json = "--json" in args
-    files = [a for a in args if a != "--json"]
-    if len(files) != 1 or files[0].startswith("-"):
-        sys.stderr.write("usage: validate.py FILE [--json]\n")
-        return 2
+    options, problem = _parse_args(args)
+    if options is None:
+        report = parse_failure("(usage)", problem)
+        return _fail(report, "--json" in args, f"{problem}\n{USAGE}")
     try:
-        report = validate_file(files[0])
+        text = _read(options.source)
     except OSError as exc:
-        sys.stderr.write(f"cannot read {files[0]}: {exc.strerror or exc}\n")
-        return 2
+        report = parse_failure("(input)", f"cannot read {options.source}: {exc.strerror or exc}")
+        return _fail(
+            report, options.as_json, f"cannot read {options.source}: {exc.strerror or exc}\n"
+        )
+    except TooLargeError:
+        message = f"cannot read {options.source}: input is over {MAX_INPUT_BYTES} bytes"
+        return _fail(parse_failure("(input)", message), options.as_json, message + "\n")
     except UnicodeDecodeError:
-        sys.stderr.write(f"cannot read {files[0]}: not UTF-8 text\n")
-        return 2
-    if as_json:
-        payload = {
-            "file": files[0],
-            "valid": report.valid,
-            "findings": [f.to_dict() for f in report.findings],
-            "resolved": report.resolved,
-            "defaults": report.defaults,
-        }
-        sys.stdout.write(json.dumps(payload, indent=2) + "\n")
+        report = parse_failure("(input)", f"cannot read {options.source}: not UTF-8 text")
+        return _fail(report, options.as_json, f"cannot read {options.source}: not UTF-8 text\n")
+
+    report = validate_text(text, options.context)
+    if options.emit is not None and options.env is not None:
+        if not report.valid or report.parse_error:
+            sys.stderr.write(_render_text(report) + "\n")
+            return report.exit_code
+        if options.env not in report.envs:
+            sys.stderr.write(f"unknown env '{options.env}' (envs: {', '.join(report.envs)})\n")
+            return 2
+        sys.stdout.write(json.dumps(plan.tfvars(report.plan, options.env), indent=2) + "\n")
+        return 0
+    if options.as_json:
+        sys.stdout.write(json.dumps(report.plan, indent=2) + "\n")
     else:
         sys.stdout.write(_render_text(report) + "\n")
     return report.exit_code
