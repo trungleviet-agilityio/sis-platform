@@ -4,6 +4,7 @@
 __pycache__/
 *.pyc
 .venv/
+.venv-ci/
 .ruff_cache/
 .mypy_cache/
 
@@ -29,3 +30,4 @@ PROGRESS.md
 .claude/settings.local.json
 CLAUDE.local.md
 .DS_Store
+.claude/worktrees/
