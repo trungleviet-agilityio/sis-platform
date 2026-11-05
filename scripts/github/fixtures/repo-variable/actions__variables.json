@@ -1,0 +1,9 @@
+{
+  "total_count": 1,
+  "variables": [
+    {
+      "name": "RELEASE_STRATEGY",
+      "value": "x"
+    }
+  ]
+}

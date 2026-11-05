@@ -28,6 +28,7 @@ lint: .venv-ci/.installed ## pre-commit hooks on all files, shellcheck, actionli
 	PATH="$(CURDIR)/.venv-ci/bin:$$PATH" pre-commit run --all-files --show-diff-on-failure
 	shellcheck -x $$(find scripts -name '*.sh' | sort)
 	scripts/ci/selftest.sh
+	scripts/github/selftest.sh
 	$(if $(wildcard .github/workflows/*.yml),actionlint,@echo "no workflows yet, skipping actionlint")
 
 test: require-intake ## Intake unit tests (stdlib unittest)

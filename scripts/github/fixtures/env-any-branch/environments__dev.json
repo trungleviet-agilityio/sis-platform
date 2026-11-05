@@ -1,0 +1,27 @@
+{
+  "deployment_branch_policy": {
+    "custom_branch_policies": false,
+    "protected_branches": true
+  },
+  "name": "dev",
+  "protection_rules": [
+    {
+      "id": 1,
+      "prevent_self_review": false,
+      "reviewers": [
+        {
+          "reviewer": {
+            "id": 1,
+            "login": "owner"
+          },
+          "type": "User"
+        }
+      ],
+      "type": "required_reviewers"
+    },
+    {
+      "id": 2,
+      "type": "branch_policy"
+    }
+  ]
+}
