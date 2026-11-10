@@ -1,0 +1,6 @@
+# CI-only Python tools. Hash-locked with:
+#   uv pip compile --generate-hashes --universal --python-version 3.13 -o scripts/ci/requirements.txt scripts/ci/requirements.in
+# These run on the dev and CI Python (3.13); the intake runtime floor (3.9) is tested with stdlib only.
+# The pre-commit version matches mise.toml. PyYAML backs the YAML conformance test and the repo guard.
+pre-commit==4.7.0
+PyYAML==6.0.3

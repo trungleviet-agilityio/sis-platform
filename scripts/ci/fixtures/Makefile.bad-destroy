@@ -1,0 +1,5 @@
+.PHONY: help
+help:
+	@echo hi
+tf-destroy-all:
+	@echo no

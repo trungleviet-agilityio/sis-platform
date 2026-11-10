@@ -1,0 +1,10 @@
+name: bad permissions write
+on:
+  push:
+permissions:
+  contents: write
+jobs:
+  a:
+    runs-on: ubuntu-24.04
+    steps:
+      - run: echo hi

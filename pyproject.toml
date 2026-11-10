@@ -1,0 +1,25 @@
+# Dev-tool config only. The intake package is stdlib-only at runtime and supports Python 3.9 (ADR 0001 Z3);
+# ruff and mypy run through pre-commit, never from a requirements file.
+
+[tool.ruff]
+target-version = "py39"
+line-length = 100
+src = ["intake"]
+extend-exclude = ["scripts/ci/fixtures"]
+
+[tool.ruff.lint]
+# E/W pycodestyle, F pyflakes, I isort, N naming, UP pyupgrade, B bugbear, S bandit, SIM simplify.
+select = ["E", "W", "F", "I", "N", "UP", "B", "S", "SIM"]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests assert and run the CLI as a subprocess on purpose.
+"intake/tests/**" = ["S101", "S603", "S607"]
+# The CI guard script keeps PyYAML as a lazy import and targets the dev interpreter.
+"scripts/**" = ["UP006", "UP007", "UP035", "UP045"]
+
+[tool.mypy]
+python_version = "3.9"
+files = ["intake/sis_intake", "intake/tests"]
+mypy_path = "intake"
+strict = true
+warn_unreachable = true

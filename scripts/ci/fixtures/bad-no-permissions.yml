@@ -1,0 +1,8 @@
+name: bad no permissions
+on:
+  pull_request:
+jobs:
+  a:
+    runs-on: ubuntu-24.04
+    steps:
+      - run: echo hi

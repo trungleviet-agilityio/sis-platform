@@ -1,0 +1,8 @@
+name: bad trigger dispatch
+on: [push, workflow_dispatch]
+permissions: {}
+jobs:
+  a:
+    runs-on: ubuntu-24.04
+    steps:
+      - run: echo hi
