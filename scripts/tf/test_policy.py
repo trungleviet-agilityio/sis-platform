@@ -330,5 +330,173 @@ class InputTests(unittest.TestCase):
         self.assertIn("P01", out)
 
 
+def write_plan(directory: Path, changes: List[object], name: str = "plan.json") -> str:
+    path = directory / name
+    path.write_text(
+        json.dumps({"format_version": "1.2", "resource_changes": changes}), encoding="utf-8"
+    )
+    return str(path)
+
+
+class AllowNoPolicyTests(unittest.TestCase):
+    """--allow-no-policy, used by the reusable plan and apply workflows (ADR 0002 W3)."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.dir = Path(self.tmp.name)
+        self.data = write_plan(
+            self.dir,
+            [{"address": "terraform_data.x", "type": "terraform_data", "change": {}}],
+        )
+
+    def test_a_plan_without_policies_is_still_exit_2_without_the_flag(self) -> None:
+        code, out = run_main([self.data, "--boundary-arn", BOUNDARY])
+        self.assertEqual(code, 2)
+        self.assertIn("no IAM policy found in the input", out)
+
+    def test_a_plan_without_policies_passes_with_the_flag(self) -> None:
+        code, out = run_main([self.data, "--boundary-arn", BOUNDARY, "--allow-no-policy"])
+        self.assertEqual(code, 0, out)
+        self.assertIn("the plan creates or changes no IAM policy", out)
+
+    def test_the_flag_still_lints_a_plan_with_policies(self) -> None:
+        bad = json.dumps({"Statement": [{"Effect": "Allow", "Action": "*", "Resource": "*"}]})
+        path = write_plan(
+            self.dir,
+            [
+                {
+                    "address": "aws_iam_policy.admin",
+                    "type": "aws_iam_policy",
+                    "change": {"actions": ["create"], "after": {"policy": bad}},
+                }
+            ],
+            "bad.json",
+        )
+        code, out = run_main([path, "--boundary-arn", BOUNDARY, "--allow-no-policy"])
+        self.assertEqual(code, 1)
+        self.assertIn("P01", out)
+
+    def test_the_flag_refuses_an_input_that_is_not_a_plan(self) -> None:
+        doc = write_doc(self.dir, [{"Effect": "Allow", "Action": "s3:GetObject", "Resource": "x"}])
+        code, out = run_main([doc, "--allow-no-policy"])
+        self.assertEqual(code, 2)
+        self.assertIn("not the JSON of terraform show -json (--allow-no-policy)", out)
+
+
+STAR = json.dumps({"Statement": [{"Effect": "Allow", "Action": "*", "Resource": "*"}]})
+TRUST = json.dumps(
+    {"Statement": [{"Effect": "Allow", "Action": "sts:AssumeRole", "Principal": {"Service": "x"}}]}
+)
+
+
+def change(
+    kind: str, after: object, actions: Optional[List[str]] = None, **extra: object
+) -> object:
+    body = {"actions": actions or ["create"], "after": after, "after_unknown": {}}
+    body.update(extra)
+    return {"address": f"{kind}.x", "type": kind, "name": "x", "change": body}
+
+
+class PlanIamTests(unittest.TestCase):
+    """Plans: role inline policies, attachments (P12) and unknown IAM types (P13)."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.dir = Path(self.tmp.name)
+
+    def lint(self, changes: List[object], *flags: str, **top: object) -> Tuple[int, str]:
+        path = self.dir / "plan.json"
+        path.write_text(
+            json.dumps({"format_version": "1.2", "resource_changes": changes, **top}),
+            encoding="utf-8",
+        )
+        return run_main([str(path), "--boundary-arn", BOUNDARY, *flags])
+
+    def test_role_inline_policy_is_linted(self) -> None:
+        role = change(
+            "aws_iam_role",
+            {"assume_role_policy": TRUST, "inline_policy": [{"name": "a", "policy": STAR}]},
+        )
+        code, out = self.lint([role], "--allow-no-policy")
+        self.assertEqual(code, 1)
+        self.assertIn("aws_iam_role.x.inline_policy[0]: P01", out)
+
+    def test_role_trust_is_parsed_not_linted(self) -> None:
+        role = change("aws_iam_role", {"assume_role_policy": TRUST, "inline_policy": []})
+        code, out = self.lint([role], "--allow-no-policy")
+        self.assertEqual(code, 0, out)
+        bad = change("aws_iam_role", {"assume_role_policy": "{not json"})
+        code, out = self.lint([bad], "--allow-no-policy")
+        self.assertEqual(code, 2)
+        self.assertIn("assume_role_policy: policy is not valid JSON", out)
+
+    def test_computed_inline_policy_fails_closed_only_when_written(self) -> None:
+        role = change(
+            "aws_iam_role", {"assume_role_policy": TRUST}, after_unknown={"inline_policy": True}
+        )
+        code, out = self.lint([role], "--allow-no-policy")
+        self.assertEqual(code, 0, out)
+        config = {
+            "root_module": {
+                "resources": [
+                    {"type": "aws_iam_role", "name": "x", "expressions": {"inline_policy": [{}]}}
+                ]
+            }
+        }
+        code, out = self.lint([role], "--allow-no-policy", configuration=config)
+        self.assertEqual(code, 1)
+        self.assertIn("P00 policy unknown at plan time", out)
+
+    def test_aws_managed_attachment_is_p12_with_or_without_the_flag(self) -> None:
+        for kind in (
+            "aws_iam_role_policy_attachment",
+            "aws_iam_policy_attachment",
+            "aws_iam_user_policy_attachment",
+            "aws_iam_group_policy_attachment",
+        ):
+            att = change(kind, {"policy_arn": "arn:aws:iam::aws:policy/AdministratorAccess"})
+            for flags in ((), ("--allow-no-policy",)):
+                code, out = self.lint([att], *flags)
+                self.assertEqual(code, 1, (kind, flags, out))
+                self.assertIn("P12 attaches the AWS managed policy", out)
+
+    def test_role_managed_policy_arns_is_p12(self) -> None:
+        role = change(
+            "aws_iam_role",
+            {
+                "assume_role_policy": TRUST,
+                "managed_policy_arns": ["arn:aws:iam::aws:policy/ReadOnlyAccess"],
+            },
+        )
+        code, out = self.lint([role], "--allow-no-policy")
+        self.assertEqual(code, 1)
+        self.assertIn("P12", out)
+
+    def test_customer_managed_attachment_passes(self) -> None:
+        att = change(
+            "aws_iam_role_policy_attachment",
+            {"policy_arn": "arn:aws:iam::123456789012:policy/sis-dev-app"},
+        )
+        code, out = self.lint([att], "--allow-no-policy")
+        self.assertEqual(code, 0, out)
+
+    def test_unknown_iam_type_fails_closed_under_the_flag(self) -> None:
+        profile = change("aws_iam_instance_profile", {"role": "r"})
+        code, out = self.lint([profile], "--allow-no-policy")
+        self.assertEqual(code, 1)
+        self.assertIn("P13 aws_iam_instance_profile is an IAM type this linter does not read", out)
+        code, out = self.lint([profile])
+        self.assertEqual(code, 2)
+        self.assertNotIn("P13", out)
+
+    def test_a_deleted_or_unchanged_iam_resource_is_not_p13(self) -> None:
+        for actions in (["delete"], ["no-op"], ["read"]):
+            profile = change("aws_iam_instance_profile", None, actions)
+            code, out = self.lint([profile], "--allow-no-policy")
+            self.assertEqual(code, 0, (actions, out))
+
+
 if __name__ == "__main__":
     unittest.main()

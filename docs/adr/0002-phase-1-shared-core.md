@@ -570,9 +570,9 @@ Stays (C) until the checkpoint, in addition to the list above: the size of the g
 6144-character limit, the `sha_pinning_required` field in the Actions permissions API, Administration read for
 rulesets, and the event refusal of AA3 in a live run.
 
-## Amendment B (2026-11-04, proposed): decisions from the wave 2 build and verify
+## Amendment B (2026-11-04, accepted): decisions from the wave 2 build and verify
 
-- Status: proposed (owner to accept with the wave 2 PRs)
+- Status: accepted (owner, 2026-11-04)
 - Source: peer reviews of 1h and 1f-1, and the wave 2 verify (e2e release simulation, security review).
 
 | # | Decision | Amends | Pillars |
@@ -591,6 +591,47 @@ they are released); a consumer can vendor platform code through local paths; a t
 sis-platform at another SHA is invisible to L3 (IAM `job_workflow_ref`, O9, is the enforcement); tag integrity relies
 on the immutable tag ruleset.
 
+## Amendment C (2026-11-04, accepted): decisions from the 1f-2 build and verify
+
+- Status: accepted (owner, 2026-11-04)
+- Source: the 1f-2 build, its peer review, and the wave 3 verify (e2e offline replay of every `run:` step,
+  reviewer, security review twice, code-simplifier).
+
+| # | Decision | Amends | Pillars |
+|---|---|---|---|
+| AC1 | The `consumer` guard profile also allows `schedule`, so the weekly W5 `platform-check.yml` can live in the consumer repo. `workflow_dispatch` inputs stay limited to `env`, `sha`, `digest` | H4, W5 | SEC, OPS |
+| AC2 | Sparse-checkout patterns are written literally in every reusable job (`:(glob)X` becomes `/X`, `:(exclude,glob)X` becomes `!/X`), and `scripts/ci/check_sparse.py` fails CI unless each list equals `closure.txt` in order. This is how AB8 "derived from closure.txt" is met: the file cannot be read before the checkout, and literal lists stay visible to the guard (H6) | O11, AB8 | SEC |
+| AC3 | `resolve.py` (closure) runs in every job that needs resolved values, because jobs share no disk. It checks the trust (O11), the M6 manifest, the M7 `SIS_PROJECT_PREFIX` in the caller's `project.env`, and that the family is one this workflow has a job for (`SUPPORTED_FAMILIES`, a literal per workflow, kept equal to the `if:` gates by a selftest). An unsupported family fails instead of skipping green | W2, M7 | REL, SEC |
+| AC4 | Event and ref allowlists in the first step after harden-runner: plan accepts `pull_request`, `push`, `workflow_dispatch`, `schedule`; apply accepts `push` and `workflow_dispatch` on `refs/heads/main` only, repeated before the credential, and also refuses a run whose `github.sha` is not the current `main` tip (stale re-run); the smoke accepts `workflow_dispatch` on `refs/heads/main`. A `check_repo.py` rule enforces the apply step (the H rule AA3 asked for). All reusable workflows set `defaults.run.shell: bash` (pipefail) | AA3, W4, O12 | SEC, REL |
+| AC5 | The stale-apply check uses an anonymous `git ls-remote` over `github.com`, so it needs a public consumer repo (the canary is public, F30). Options: (a) anonymous, public repos only (chosen for Phase 1); (b) authenticate with the job token for private consumers (Phase 2, when the first private consumer appears). A race with a newer `main` push between the check and the apply is accepted: the newer run queues behind `tf-<env>` | W4 | SEC |
+| AC6 | Provider supply chain: a closure file `scripts/platform/terraformrc` sets `provider_installation { direct { include = ["registry.terraform.io/hashicorp/*"] } }` through `TF_CLI_CONFIG_FILE`, which disables implied local mirrors. `init -backend=false -lockfile=readonly`, then `resolved-sources.sh`, then `validate` all run before the role is assumed; the backend init after it runs `resolved-sources.sh` again | H9, AB4, O14 | SEC |
+| AC7 | Raw `terraform plan` and `apply` output goes to a file under `$RUNNER_TEMP`, not the public log. On failure it is printed with every 12-digit run and every `dddd-dddd-dddd` run replaced by `<account>`. The PR comment and step summary stay the account-free summary (W3). `assert-no-account-id.sh` also catches the dashed form | W3, H7 | SEC |
+| AC8 | `scripts/tf/policy.py --allow-no-policy` returns 0 with a note when the plan holds no IAM policy (default exit 2 unchanged for module checks). The workflows call `policy.py` directly. Because a no-policy pass must not hide IAM changes, `policy.py` also lints `aws_iam_role` `inline_policy` (unknown at plan time fails closed, P00), fails any AWS managed policy attached by any attachment type or `managed_policy_arns` (P12, allowlist empty in Phase 1), and under the flag fails any created or updated `aws_iam_*` type it does not read (P13). Phase 2 runtime roles set no `inline_policy` and no `managed_policy_arns`; grants come only from linted documents | T11 | SEC |
+| AC9 | State backend over path-style S3 (`use_path_style = true`), so the credentialed jobs need one literal host, `s3.<region>.amazonaws.com`. Options: (a) path style (chosen; H3 allows only the account secret and the region in a host); (b) let H3 accept the M6 prefix and pin the virtual-hosted bucket host. Switch to (b) in a patch if (a) fails with account-regional buckets at step 8 (C) | T3, H3 | SEC, REL |
+| AC10 | W5 egress: `reusable-platform-check.yml` has no credentials and runs harden-runner `audit` with `github.com`, `pypi.org` and `files.pythonhosted.org`, because AB8 requires PyYAML installed by hash (`--require-hashes --only-binary --no-deps`) | W5, AB8 | SEC |
+| AC11 | `reusable-oidc-smoke.yml` is exempt from the H3 family gate: it calls no AWS service except, in `check: negative`, unsigned STS (`sts.<region>`); the claims job egress is `github.com` only. Input `check` is `claims` (default) or `negative`; any other value fails | H3, O12 | SEC |
+| AC12 | Step 7 proves a refused trust only after step 8 has proved the same apply role ARN, because STS also answers AccessDenied for a missing role or another account. The owner re-runs step 7 after step 8. The deploy role has no positive proof in Phase 1 (inert by design, L3 c) | O12 | REL, SEC |
+| AC13 | `.github/actionlint.yaml` ignores only the `job.workflow_*` properties (F17) until actionlint knows them | H1 | OPS |
+| AC14 | `examples/consumer/infra/envs/{dev,prod}` is a minimal root (empty `backend "s3" {}`, AWS provider pinned, committed `.terraform.lock.hcl`, one `terraform_data`), so the canary callers run from day one. The first push to the canary `main` queues a dev apply; the owner rejects it until step 8 | Checkpoint 3 | OPS |
+
+Accepted residual risks, in addition to Amendment B:
+
+- The W5 check runs the workflow file of the PR it checks (GitHub runs `pull_request` workflows from the merge
+  ref), so one PR can repin `uses:` and add the same SHA to `trusted_workflow_shas`. IAM `job_workflow_ref` (O9),
+  applied by the owner, is the enforcement. Mitigation for the canary: CODEOWNERS review on `platform.lock` and
+  `.github/workflows/**` (C, whether rulesets can require it on this plan).
+- A same-repo PR runs code as the nonprod plan role (O14). Besides the S3 host, `github.com:443` is open, so the
+  role's reads can leave the runner. Accepted, limited by the T4 denies.
+- The prod plan role pins no workflow file, so any workflow on `main` or any job with `environment: prod` in the
+  consumer repo can assume it (O14 as written). Accepted, read-only and limited by T4.
+- The plan comment renders PR-controlled resource addresses as markdown on the author's own PR. Accepted.
+
+Stays (C) until the checkpoint: GitHub fills `job.workflow_repository`, `job.workflow_file_path` and
+`job.workflow_sha` in a cross-repo reusable call (F17, F28); harden-runner `block` lets the OIDC token request
+through with only `github.com` listed (record the host seen at step 4a); the `job_workflow_ref` format (O12 4a);
+the environment secret resolves cross-owner (F29); path-style S3 with account-regional buckets and the Lambda host
+list (step 8); the PyYAML wheel hash on `ubuntu-24.04`.
+
 ## Change log
 
 | Date | Change |
@@ -599,3 +640,6 @@ on the immutable tag ruleset.
 | 2026-11-04 | Revised after challenger review C1 to C27: every trusted SHA checked remotely (L3); both environments gated, public canary (F30); claims smoke before any account (O12); trust moves batched (L7); fail-closed sparse closure (L2, O11); plan role denies and prod plan from `main` (T4, O14); escalation lint and boundary (T11); one full policy linter (T8); promotion deferred (T6); environment secret mechanism documented with a fallback (O13, F29); detective baseline (T7); ECR lifecycle (T5); separate board token (B16) and a before-build checkpoint; parallel sub-PR waves; WA findings added (M10, D18 to D21, H10, B14) or recorded with their phase |
 | 2026-11-04 | Amendment A: decisions from the wave 1 build and verify (accepted by the owner) |
 | 2026-11-04 | Amendment B (proposed): decisions from the wave 2 build and verify |
+| 2026-11-04 | Amendment C (proposed): decisions from the 1f-2 build and verify |
+| 2026-11-04 | Amendment C accepted by the owner |
+| 2026-11-04 | Amendment B accepted by the owner |

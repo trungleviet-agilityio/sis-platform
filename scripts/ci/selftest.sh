@@ -73,6 +73,14 @@ expect_fail workflow "$fx/reusable-bad-trigger.yml" "declares trigger 'push' (on
 expect_pass workflow "$fx/examples/consumer/.github/workflows/good.yml"
 expect_fail workflow "$fx/examples/consumer/.github/workflows/bad-input.yml" "workflow_dispatch input 'ref' is not allowed"
 expect_fail workflow "$fx/examples/consumer/.github/workflows/bad-env-type.yml" "input 'env' must be type: choice"
+expect_fail workflow "$fx/aa3/reusable-terraform-apply.yml" \
+  "job 'apply-lambda': the step after harden-runner must be the AA3 gate"
+out="$(trap - ERR; "$py" -I "$guard" workflow "$fx/aa3/reusable-terraform-apply.yml" 2>&1)" || true
+case "$out" in *"job 'resolve'"*) die "selftest: the AA3 rule flagged a resolve job that has the canonical gate" ;; esac
+expect_fail workflow "$fx/aa3-if/reusable-terraform-apply.yml" "job 'resolve': the AA3 gate step must not set \`if:\`"
+expect_fail workflow "$fx/aa3-exit0/reusable-terraform-apply.yml" "job 'resolve': the step after harden-runner must be the AA3 gate"
+expect_pass workflow "$fx/examples/consumer/.github/workflows/good-schedule.yml"
+expect_fail workflow "$fx/bad-schedule.yml" "trigger 'schedule' is not allowed (only pull_request, push, workflow_call)"
 expect_pass makefile "$fx/Makefile.good"
 expect_fail makefile "$fx/Makefile.bad-apply" "apply"
 expect_fail makefile "$fx/Makefile.bad-destroy" "destroy"
@@ -208,6 +216,54 @@ cases = [(acct, True), (dashed, True), ("1234-5678-9012", False), ("123456789012
 for text, hit in cases:
     assert bool(rx.search(text)) == hit, (text, hit)
 PY
+
+log "sparse-checkout lists equal closure.txt (AB8)"
+sparse="$ROOT/scripts/ci/check_sparse.py"
+reusables=()
+for f in "$ROOT"/.github/workflows/reusable-*.yml; do
+  if [ -f "$f" ]; then reusables+=("$f"); fi
+done
+if [ ${#reusables[@]} -gt 0 ]; then
+  "$py" -I "$sparse" --closure "$ROOT/scripts/release/closure.txt" "${reusables[@]}" ||
+    die "selftest: a reusable workflow's sparse-checkout differs from closure.txt"
+fi
+out="$(trap - ERR; "$py" -I "$sparse" --closure "$ROOT/scripts/release/closure.txt" "$fx/reusable-good.yml" 2>&1)" &&
+  die "selftest: check_sparse.py should fail on a partial sparse-checkout"
+case "$out" in
+  *"sparse-checkout differs from closure.txt (missing ['/scripts/release/closure.txt'"*) ;;
+  *) die "selftest: check_sparse.py failed without the expected message. Got: $out" ;;
+esac
+printf ':(glob)a\n:(icase)b\n' >"$tmp/closure-magic.txt"
+out="$(trap - ERR; "$py" -I "$sparse" --closure "$tmp/closure-magic.txt" "$fx/reusable-good.yml" 2>&1)" &&
+  die "selftest: check_sparse.py should refuse other pathspec magic"
+case "$out" in *"is not :(glob) or :(exclude,glob)"*) ;; *) die "selftest: check_sparse.py magic message. Got: $out" ;; esac
+
+log "reusable workflows: bash with pipefail, and SUPPORTED_FAMILIES equal to the family gates (W2)"
+if [ ${#reusables[@]} -gt 0 ]; then
+  "$py" -I - "${reusables[@]}" <<'PY' || die "selftest: a reusable workflow lacks the shell default or its family list drifted"
+import re
+import sys
+
+import yaml
+
+bad = []
+for path in sys.argv[1:]:
+    doc = yaml.safe_load(open(path, encoding="utf-8"))
+    if ((doc.get("defaults") or {}).get("run") or {}).get("shell") != "bash":
+        bad.append(f"{path}: defaults.run.shell must be bash (pipefail)")
+    text = open(path, encoding="utf-8").read()
+    gates = set(re.findall(r"needs\.resolve\.outputs\.family == '([a-z0-9-]+)'", text))
+    listed = re.findall(r"SUPPORTED_FAMILIES: ([a-z0-9,-]+)", text)
+    if gates and (not listed or any(set(v.split(",")) != gates for v in listed)):
+        bad.append(f"{path}: SUPPORTED_FAMILIES {listed} differs from the family gates {sorted(gates)}")
+for line in bad:
+    print(line, file=sys.stderr)
+sys.exit(1 if bad else 0)
+PY
+fi
+
+log "scripts the reusable workflows run"
+"$ROOT/scripts/ci/platform-selftest.sh"
 
 log "guard on the real repository"
 expect_pass repo "$ROOT"

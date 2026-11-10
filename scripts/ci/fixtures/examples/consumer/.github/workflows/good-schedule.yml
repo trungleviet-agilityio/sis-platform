@@ -1,0 +1,11 @@
+name: consumer weekly platform check
+on:
+  pull_request:
+  schedule:
+    - cron: "17 3 * * 1"
+permissions: {}
+jobs:
+  platform-check:
+    permissions:
+      contents: read
+    uses: trungleviet-agilityio/sis-platform/.github/workflows/reusable-platform-check.yml@0000000000000000000000000000000000000002 # v0.2.0

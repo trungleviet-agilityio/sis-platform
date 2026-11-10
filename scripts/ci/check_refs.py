@@ -31,6 +31,7 @@ ALLOWLIST = {
     "docs/diagrams/README.md": "created by the diagram skill in the repo it runs in",
     "docs/requirements.md": "exists in consumer repos and labs only",
     "platform.yaml": "the manifest of a consumer repo",
+    ".platform/": "the sparse checkout of this repo inside a consumer run",
     "n/a": "not a path: the words 'not applicable'",
     "origin/main": "not a path: a git remote branch",
     "step-security/harden-runner": "not a path: a GitHub Action",

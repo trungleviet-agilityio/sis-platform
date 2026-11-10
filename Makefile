@@ -24,7 +24,7 @@ venv: .venv-ci/.installed ## Hash-locked CI venv (.venv-ci) with pre-commit and 
 require-intake:
 	@test -d intake/sis_intake || { echo "error: intake/ is missing (the intake package is built in its own lane). Nothing to run." >&2; exit 1; }
 
-lint: .venv-ci/.installed ## pre-commit hooks on all files, shellcheck, actionlint, the repo guard self-tests and the doc reference check
+lint: .venv-ci/.installed ## pre-commit hooks on all files, shellcheck, actionlint, the repo guard and platform script self-tests, and the doc reference check
 	PATH="$(CURDIR)/.venv-ci/bin:$$PATH" pre-commit run --all-files --show-diff-on-failure
 	shellcheck -x $$(find scripts -name '*.sh' | sort)
 	scripts/ci/selftest.sh

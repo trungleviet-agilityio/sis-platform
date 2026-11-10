@@ -129,17 +129,17 @@ def check_lock_schema(rel: str, doc: Any) -> List[str]:
     lock_version = doc["lock_version"]
     if type(lock_version) is not int or lock_version != 1:
         problems.append(f"{rel}: lock_version must be 1")
-    if not (isinstance(doc["version"], str) and VERSION_RE.match(doc["version"])):
+    if not (isinstance(doc["version"], str) and VERSION_RE.fullmatch(doc["version"])):
         problems.append(f"{rel}: version must look like vX.Y.Z")
     for key in ("release_sha", "workflow_sha"):
-        if not (isinstance(doc[key], str) and SHA_RE.match(doc[key])):
+        if not (isinstance(doc[key], str) and SHA_RE.fullmatch(doc[key])):
             problems.append(f"{rel}: {key} must be 40 lowercase hex characters")
     trusted = doc["trusted_workflow_shas"]
     if not isinstance(trusted, list) or not 1 <= len(trusted) <= 2:
         problems.append(f"{rel}: trusted_workflow_shas must hold 1 or 2 values (N and N-1)")
     else:
         for value in trusted:
-            if not (isinstance(value, str) and SHA_RE.match(value)):
+            if not (isinstance(value, str) and SHA_RE.fullmatch(value)):
                 problems.append(
                     f"{rel}: trusted_workflow_shas value '{value}' must be 40 lowercase hex"
                 )
@@ -216,7 +216,7 @@ def check_uses(root: str, lock: Dict[str, Any]) -> List[str]:
                 continue
             comments = [COMMENT_RE.search(lines[i - 1]) for i in at]
             versions = {m.group(1) for m in comments if m}
-            if not versions or not all(VERSION_RE.match(v) for v in versions):
+            if not versions or not all(VERSION_RE.fullmatch(v) for v in versions):
                 problems.append(f"{where}: uses '{ref}' has no '# vX.Y.Z' version comment")
             elif versions != {lock["version"]}:
                 bad = sorted(versions - {lock["version"]})[0]

@@ -29,6 +29,16 @@ Rules (a statement is checked when its Effect is Allow):
       versioning, lifecycle, encryption, version deletion; repository policy, lifecycle, delete
   P00 a policy that is unknown at plan time cannot be checked (fails closed; `--unknown warn`
       only reports it)
+  P12 (plans) an attachment, or an aws_iam_role managed_policy_arns entry, names an AWS managed
+      policy (arn:aws:iam::aws:policy/...) that is not on MANAGED_POLICY_ALLOWLIST (empty)
+  P13 (plans, --allow-no-policy) a created or updated aws_iam_* resource of a type this linter
+      does not read: unknown IAM types fail closed
+Plans also lint each aws_iam_role inline_policy block like a role policy, and the role's
+assume_role_policy must parse as JSON (trust is set by the bootstrap, not linted here).
+
+`--allow-no-policy` (the reusable plan and apply workflows): every input must be a Terraform plan
+(`format_version` present), and a plan that creates or changes no IAM policy passes with a note
+instead of exit 2. Without the flag, behavior is unchanged.
 
 The `<prefix>-<env>` name and the account are derived from the boundary ARN
 (`policy/<prefix>-<env>-workload-boundary`), so P07, P10 and P11 need `--boundary-arn` (or a fixture
@@ -44,7 +54,7 @@ import argparse
 import json
 import re
 import sys
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
 # Actions that have no resource-level support (or are only meaningful on "*"). `Resource: "*"` is
 # accepted for these and nothing else. Entries are IAM globs.
@@ -142,6 +152,19 @@ POLICY_RESOURCE_TYPES = (
     "aws_iam_user_policy",
     "aws_iam_group_policy",
 )
+# Plan inputs only: attachments are checked by ARN (P12); roles by their inline_policy blocks
+# (linted like the types above), their managed_policy_arns (P12) and a parseable assume_role_policy.
+ATTACHMENT_TYPES = (
+    "aws_iam_role_policy_attachment",
+    "aws_iam_policy_attachment",
+    "aws_iam_user_policy_attachment",
+    "aws_iam_group_policy_attachment",
+)
+HANDLED_IAM_TYPES = POLICY_RESOURCE_TYPES + ATTACHMENT_TYPES + ("aws_iam_role",)
+AWS_MANAGED_PREFIX = "arn:aws:iam::aws:policy/"
+# AWS managed policies a plan may attach (P12). Empty in Phase 1: every grant is a composed, linted
+# document. Adding one is a reviewed change of this file (it is in the workflow closure).
+MANAGED_POLICY_ALLOWLIST: Tuple[str, ...] = ()
 
 Finding = Tuple[str, str, str]  # (document name, rule id, message)
 
@@ -370,6 +393,92 @@ def _load_policy(value: Any) -> Dict[str, Any]:
     return value
 
 
+def _role_inline_docs(
+    address: str, after: Dict[str, Any], after_unknown: Dict[str, Any], declares_inline: bool
+) -> List[Tuple[str, Optional[Dict[str, Any]]]]:
+    """aws_iam_role: its inline_policy blocks as documents; assume_role_policy must parse."""
+    trust = after.get("assume_role_policy")
+    if isinstance(trust, str) and trust:
+        try:
+            _load_policy(trust)
+        except InputError as exc:
+            raise InputError(f"{address}: assume_role_policy: {exc}") from exc
+    docs: List[Tuple[str, Optional[Dict[str, Any]]]] = []
+    unknown_blocks = after_unknown.get("inline_policy")
+    for i, block in enumerate(_as_list(after.get("inline_policy"))):
+        name = f"{address}.inline_policy[{i}]"
+        block_unknown = (unknown_blocks is True and declares_inline) or (
+            isinstance(unknown_blocks, list)
+            and i < len(unknown_blocks)
+            and isinstance(unknown_blocks[i], dict)
+            and unknown_blocks[i].get("policy") is True
+        )
+        if not isinstance(block, dict):
+            continue
+        policy = block.get("policy")
+        if block_unknown or not isinstance(policy, str):
+            docs.append((name, None))
+        elif policy:
+            docs.append((name, _load_policy(policy)))
+    if unknown_blocks is True and declares_inline and not docs:
+        docs.append((f"{address}.inline_policy", None))
+    return docs
+
+
+def _roles_declaring_inline(data: Dict[str, Any]) -> Set[str]:
+    """Names of aws_iam_role blocks whose configuration (any module) writes inline_policy.
+
+    inline_policy is optional and computed, so a role that does not write it plans as "known after
+    apply"; that alone is not a policy to check. Matching is by resource name across modules, which
+    errs toward failing closed (P00).
+    """
+    names: Set[str] = set()
+    stack = [((data.get("configuration") or {}).get("root_module") or {})]
+    while stack:
+        module = stack.pop()
+        for res in module.get("resources") or []:
+            if res.get("type") == "aws_iam_role" and "inline_policy" in (
+                res.get("expressions") or {}
+            ):
+                names.add(res.get("name"))
+        for call in (module.get("module_calls") or {}).values():
+            stack.append((call or {}).get("module") or {})
+    return names
+
+
+def plan_iam_findings(data: Dict[str, Any], allow_no_policy: bool) -> Tuple[List[Finding], int]:
+    """P12 and P13 over the resource changes of a plan. Returns (findings, items checked)."""
+    findings: List[Finding] = []
+    checked = 0
+    for rc in data.get("resource_changes") or []:
+        kind = str(rc.get("type", ""))
+        actions = (rc.get("change") or {}).get("actions") or []
+        if not kind.startswith("aws_iam_") or not ({"create", "update"} & set(actions)):
+            continue
+        address = str(rc.get("address", kind))
+        after = (rc.get("change") or {}).get("after") or {}
+        arns: List[Any] = []
+        if kind in ATTACHMENT_TYPES:
+            arns = [after.get("policy_arn")]
+        elif kind == "aws_iam_role":
+            arns = _as_list(after.get("managed_policy_arns"))
+        elif kind not in HANDLED_IAM_TYPES:
+            if allow_no_policy:
+                findings.append(
+                    (address, "P13", f"{kind} is an IAM type this linter does not read")
+                )
+            continue
+        for arn in arns:
+            if not isinstance(arn, str):
+                continue
+            checked += 1
+            if arn.startswith(AWS_MANAGED_PREFIX) and arn not in MANAGED_POLICY_ALLOWLIST:
+                findings.append(
+                    (address, "P12", f"attaches the AWS managed policy {arn} (not allowlisted)")
+                )
+    return findings, checked
+
+
 def collect(
     data: Any, origin: str
 ) -> Tuple[List[Tuple[str, Optional[Dict[str, Any]]]], Optional[str]]:
@@ -378,18 +487,24 @@ def collect(
         raise InputError(f"{origin}: top level is not a JSON object")
     if "resource_changes" in data or "planned_values" in data:
         docs: List[Tuple[str, Optional[Dict[str, Any]]]] = []
+        declaring = _roles_declaring_inline(data)
         for rc in data.get("resource_changes") or []:
-            if rc.get("type") not in POLICY_RESOURCE_TYPES:
-                continue
             change = rc.get("change") or {}
             if "delete" in (change.get("actions") or []) and "create" not in (
                 change.get("actions") or []
             ):
                 continue
             after = change.get("after") or {}
-            unknown = (change.get("after_unknown") or {}).get("policy")
+            after_unknown = change.get("after_unknown") or {}
             address = str(rc.get("address", rc.get("type")))
-            if unknown is True or "policy" not in after:
+            if rc.get("type") == "aws_iam_role":
+                docs.extend(
+                    _role_inline_docs(address, after, after_unknown, rc.get("name") in declaring)
+                )
+                continue
+            if rc.get("type") not in POLICY_RESOURCE_TYPES:
+                continue
+            if after_unknown.get("policy") is True or "policy" not in after:
                 docs.append((address, None))
             else:
                 docs.append((address, _load_policy(after["policy"])))
@@ -407,7 +522,9 @@ def collect(
     raise InputError(f"{origin}: not a plan, a fixture or a policy document")
 
 
-def run(paths: List[str], boundary_arn: Optional[str], unknown: str) -> Tuple[int, List[str]]:
+def run(
+    paths: List[str], boundary_arn: Optional[str], unknown: str, allow_no_policy: bool = False
+) -> Tuple[int, List[str]]:
     lines: List[str] = []
     failed = False
     checked = 0
@@ -418,8 +535,18 @@ def run(paths: List[str], boundary_arn: Optional[str], unknown: str) -> Tuple[in
             else:
                 with open(path, encoding="utf-8") as handle:
                     data = json.load(handle)
+            if allow_no_policy and not (isinstance(data, dict) and "format_version" in data):
+                raise InputError(
+                    f"{path}: not the JSON of terraform show -json (--allow-no-policy)"
+                )
             docs, file_boundary = collect(data, path)
             boundary = boundary_arn or file_boundary
+            if isinstance(data, dict) and "resource_changes" in data:
+                plan_findings, plan_checked = plan_iam_findings(data, allow_no_policy)
+                checked += plan_checked
+                for address, rule, message in plan_findings:
+                    lines.append(f"{path}: {address}: {rule} {message}")
+                    failed = True
             for name, policy in docs:
                 checked += 1
                 label = f"{path}: {name}"
@@ -432,7 +559,9 @@ def run(paths: List[str], boundary_arn: Optional[str], unknown: str) -> Tuple[in
                     failed = True
         except (OSError, json.JSONDecodeError, InputError) as exc:
             return 2, [f"error: {path}: {exc}"]
-    if checked == 0:
+    if checked == 0 and not failed:
+        if allow_no_policy:
+            return 0, ["ok  policy lint: the plan creates or changes no IAM policy"]
         return 2, ["error: no IAM policy found in the input"]
     return (1 if failed else 0), lines
 
@@ -449,8 +578,13 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument(
         "--unknown", choices=("fail", "warn"), default="fail", help="policies unknown at plan time"
     )
+    parser.add_argument(
+        "--allow-no-policy",
+        action="store_true",
+        help="inputs must be Terraform plans; one with no IAM policy passes (reusable workflows)",
+    )
     args = parser.parse_args(argv)
-    code, lines = run(args.files, args.boundary_arn, args.unknown)
+    code, lines = run(args.files, args.boundary_arn, args.unknown, args.allow_no_policy)
     for line in lines:
         sys.stderr.write(line + "\n")
     if code == 0:

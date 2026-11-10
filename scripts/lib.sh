@@ -28,6 +28,16 @@ die() {
 
 trap 'die "${BASH_SOURCE[1]##*/}: command failed at line $LINENO"' ERR
 
+# mask <value>: hide a value in every later log line of a GitHub job (a workflow command on stdout). Prints nothing
+# outside GitHub Actions, so a local run or a self-test never carries the value.
+mask() {
+  if [ -n "${GITHUB_ACTIONS:-}" ]; then printf '::add-mask::%s\n' "$1"; fi
+}
+
+# redact_ids: filter that replaces every run of 12 digits, and the dddd-dddd-dddd spelling, with <account>, so
+# AWS and Terraform output can be printed in a public log. It over-redacts on purpose (any 12-digit run).
+redact_ids() { sed -E -e 's/[0-9]{4}-[0-9]{4}-[0-9]{4}/<account>/g' -e 's/[0-9]{12}/<account>/g'; }
+
 # require_cmd <command> <install hint>
 require_cmd() {
   command -v "$1" >/dev/null 2>&1 || die "$1 not found. Install: $2"

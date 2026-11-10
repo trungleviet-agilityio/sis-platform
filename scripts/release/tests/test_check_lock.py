@@ -105,6 +105,17 @@ class LockSchema(OfflineCase):
         self.edit_lock(release_sha="v0.2.0")
         self.expect_fail("platform.lock: release_sha must be 40 lowercase hex characters")
 
+    def test_trailing_newline_fails_every_sha_and_version(self) -> None:
+        # `$` in a match() also accepts a value that ends in a newline; fullmatch() must refuse it.
+        self.edit_lock(release_sha=A + "\n")
+        self.expect_fail("platform.lock: release_sha must be 40 lowercase hex characters")
+        self.edit_lock(release_sha=A, workflow_sha=B + "\n", trusted_workflow_shas=[B])
+        self.expect_fail("platform.lock: workflow_sha must be 40 lowercase hex characters")
+        self.edit_lock(workflow_sha=B, trusted_workflow_shas=[B + "\n"])
+        self.expect_fail("must be 40 lowercase hex")
+        self.edit_lock(trusted_workflow_shas=[B], version="v0.2.0\n")
+        self.expect_fail("platform.lock: version must look like vX.Y.Z")
+
     def test_workflow_sha_shape(self) -> None:
         self.edit_lock(workflow_sha=B.upper(), trusted_workflow_shas=[B])
         self.expect_fail("platform.lock: workflow_sha must be 40 lowercase hex characters")

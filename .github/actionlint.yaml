@@ -1,0 +1,7 @@
+# actionlint 1.7.12 (the latest release on 2026-11-04) does not know the `job.workflow_*` properties yet. GitHub
+# documents them (ADR 0002 F17, F28) and the reusable workflows rely on them (O11). Only that one message is ignored,
+# only in the reusable workflows; drop this file once actionlint knows the properties.
+paths:
+  .github/workflows/reusable-*.yml:
+    ignore:
+      - 'property "workflow_(sha|repository|file_path|ref)" is not defined in object type \{check_run_id'

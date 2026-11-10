@@ -15,7 +15,9 @@ unexpectedly passes. No secret values and no account IDs belong in this file or 
 
 ## 2. Collect the claims (non-secret, no token)
 
-1. Owner: run the smoke workflow's claims step (`reusable-oidc-smoke.yml` from the canary repo, `main`, `environment: dev`).
+1. Owner: run the claims smoke from the canary repo on `main` (it calls `reusable-oidc-smoke.yml` with `check: claims`,
+   `environment: dev`; no AWS call):
+   `gh workflow run oidc-smoke.yml -R trungleviet-agilityio/sis-platform-canary --ref main -f env=dev`
 2. Record `job_workflow_ref`, `job_workflow_sha`, `sub`, `ref`, `repository_id`.
 3. Owner, with Identity Center credentials: compare with the role trust, `aws iam get-role --role-name <prefix>-<env>-gha-<plan|apply|deploy>` and read
    `AssumeRolePolicyDocument`. Check `aud` = `sts.amazonaws.com`, the `sub`, and the `job_workflow_ref` value
