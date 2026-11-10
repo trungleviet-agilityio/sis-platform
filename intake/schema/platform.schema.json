@@ -5,117 +5,330 @@
   "description": "Uses only the keyword subset interpreted by sis_intake/schema.py. Account labels only, never account IDs.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "project", "platform", "runtime", "envs"],
+  "required": [
+    "schema_version",
+    "project",
+    "platform",
+    "runtime",
+    "budget",
+    "envs"
+  ],
   "properties": {
-    "schema_version": {"const": 1},
+    "schema_version": {
+      "const": 1
+    },
     "project": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["name", "prefix"],
+      "required": [
+        "name",
+        "prefix",
+        "owner"
+      ],
       "properties": {
-        "name": {"type": "string", "pattern": "^[a-z][a-z0-9-]{1,40}$"},
-        "prefix": {"type": "string", "pattern": "^[a-z][a-z0-9]{1,7}$"}
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{1,40}$"
+        },
+        "prefix": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9]{1,7}$"
+        },
+        "owner": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9-]{0,38}(/[A-Za-z0-9][A-Za-z0-9_-]{0,99})?$"
+        }
       }
     },
     "platform": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["version"],
+      "required": [
+        "version"
+      ],
       "properties": {
-        "version": {"type": "string", "pattern": "^v[0-9]+\\.[0-9]+\\.[0-9]+$"}
+        "version": {
+          "type": "string",
+          "pattern": "^v[0-9]+\\.[0-9]+\\.[0-9]+$"
+        }
       }
     },
     "workload": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "shape": {"enum": ["web", "events", "worker", "batch"]},
-        "port": {"type": "integer", "minimum": 1, "maximum": 65535},
-        "health_path": {"type": "string", "pattern": "^/"},
-        "max_duration_seconds": {"type": "integer", "minimum": 1},
-        "max_payload_mb": {"type": "integer", "minimum": 1},
-        "needs": {"type": "array", "items": {"enum": ["gpu", "os", "licence"]}}
+        "shape": {
+          "enum": [
+            "web",
+            "events",
+            "worker",
+            "batch"
+          ]
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "health_path": {
+          "type": "string",
+          "pattern": "^/"
+        },
+        "max_duration_seconds": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "max_payload_mb": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "needs": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "gpu",
+              "os",
+              "licence",
+              "websockets"
+            ]
+          }
+        },
+        "peak_rps": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "p95_ms": {
+          "type": "integer",
+          "minimum": 1
+        }
       }
     },
     "runtime": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["kind"],
+      "required": [
+        "kind"
+      ],
       "properties": {
-        "kind": {"enum": ["lambda-web", "lambda-events", "ecs-fargate", "ec2-asg", "eks-workload"]},
-        "arch": {"enum": ["arm64", "x86_64"]},
-        "front_door": {"enum": ["http-api", "function-url", "cloudfront", "alb", "none"]}
+        "kind": {
+          "enum": [
+            "lambda-web",
+            "lambda-events",
+            "ecs-fargate",
+            "ec2-asg",
+            "eks-workload"
+          ]
+        },
+        "arch": {
+          "enum": [
+            "arm64",
+            "x86_64"
+          ]
+        },
+        "front_door": {
+          "enum": [
+            "http-api",
+            "function-url",
+            "cloudfront",
+            "alb",
+            "none"
+          ]
+        }
       }
     },
     "ci": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "provider": {"enum": ["github-actions", "codepipeline"]}
+        "provider": {
+          "enum": [
+            "github-actions",
+            "codepipeline"
+          ]
+        }
       }
     },
     "budget": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["monthly_usd"],
+      "required": [
+        "monthly_usd"
+      ],
       "properties": {
-        "monthly_usd": {"type": "integer", "minimum": 0}
+        "monthly_usd": {
+          "type": "integer",
+          "minimum": 0
+        }
       }
     },
     "dr": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "strategy": {"enum": ["backup-restore", "pilot-light", "warm-standby", "multi-site"]},
-        "rto_minutes": {"type": "integer", "minimum": 0},
-        "rpo_minutes": {"type": "integer", "minimum": 0}
+        "strategy": {
+          "enum": [
+            "backup-restore",
+            "pilot-light",
+            "warm-standby",
+            "multi-site"
+          ]
+        },
+        "rto_minutes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "rpo_minutes": {
+          "type": "integer",
+          "minimum": 0
+        }
       }
     },
     "compliance": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "data_class": {"enum": ["public", "internal", "confidential", "regulated"]},
-        "kms_cmk": {"type": "boolean"}
+        "data_class": {
+          "enum": [
+            "public",
+            "internal",
+            "confidential",
+            "regulated"
+          ]
+        },
+        "kms_cmk": {
+          "type": "boolean"
+        }
       }
     },
     "database": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "kind": {"enum": ["none", "postgres", "mysql", "dynamodb", "other"]},
-        "schema_change": {"enum": ["expand-contract", "in-place"]}
+        "kind": {
+          "enum": [
+            "none",
+            "postgres",
+            "mysql",
+            "dynamodb",
+            "other"
+          ]
+        },
+        "schema_change": {
+          "enum": [
+            "expand-contract",
+            "in-place"
+          ]
+        }
       }
     },
     "envs": {
       "type": "object",
-      "additionalProperties": {"$ref": "#/$defs/env"}
+      "additionalProperties": {
+        "$ref": "#/$defs/env"
+      },
+      "minProperties": 1,
+      "propertyNames": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9]{1,7}$"
+      }
     }
   },
   "$defs": {
     "env": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["account", "region"],
+      "required": [
+        "tier",
+        "account",
+        "region"
+      ],
       "properties": {
-        "account": {"type": "string", "pattern": "^[a-z][a-z0-9-]*$"},
-        "region": {"type": "string", "pattern": "^[a-z]{2}(-[a-z]+)+-[0-9]$"},
-        "delivery": {"enum": ["push", "gitops"]},
-        "promote_from": {"type": "string", "pattern": "^[a-z][a-z0-9-]*$"},
-        "scale_to_zero": {"type": "boolean"},
-        "fargate_spot": {"type": "boolean"},
-        "release": {"$ref": "#/$defs/release"}
+        "tier": {
+          "enum": [
+            "prod",
+            "nonprod"
+          ]
+        },
+        "account": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*$"
+        },
+        "region": {
+          "type": "string",
+          "pattern": "^[a-z]{2}(-[a-z]+)+-[0-9]$"
+        },
+        "delivery": {
+          "enum": [
+            "push",
+            "gitops"
+          ]
+        },
+        "promote_from": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*$"
+        },
+        "scale_to_zero": {
+          "type": "boolean"
+        },
+        "fargate_spot": {
+          "type": "boolean"
+        },
+        "release": {
+          "$ref": "#/$defs/release"
+        }
       }
     },
     "release": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "strategy": {"enum": ["all-at-once", "rolling", "canary", "linear", "blue-green"]},
-        "steps": {"type": "array", "minItems": 1, "items": {"type": "integer", "minimum": 1, "maximum": 100}},
-        "bake_minutes": {"type": "integer", "minimum": 0},
-        "rollback": {"enum": ["alarm", "health", "manual"]},
-        "engine": {"enum": ["auto", "pipeline", "codedeploy", "ecs-native", "argo-rollouts", "asg"]}
+        "strategy": {
+          "enum": [
+            "all-at-once",
+            "rolling",
+            "canary",
+            "linear",
+            "blue-green"
+          ]
+        },
+        "steps": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          }
+        },
+        "bake_minutes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "rollback": {
+          "enum": [
+            "alarm",
+            "health",
+            "manual"
+          ]
+        },
+        "engine": {
+          "enum": [
+            "auto",
+            "pipeline",
+            "codedeploy",
+            "ecs-native",
+            "argo-rollouts",
+            "asg"
+          ]
+        },
+        "probes": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "pattern": "^/[A-Za-z0-9._~/-]*$"
+          }
+        }
       }
     }
   }

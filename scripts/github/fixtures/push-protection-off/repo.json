@@ -1,0 +1,14 @@
+{
+  "default_branch": "main",
+  "name": "sis-platform-canary",
+  "private": false,
+  "security_and_analysis": {
+    "secret_scanning": {
+      "status": "enabled"
+    },
+    "secret_scanning_push_protection": {
+      "status": "disabled"
+    }
+  },
+  "visibility": "public"
+}

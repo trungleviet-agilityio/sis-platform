@@ -1,4 +1,4 @@
 # Test-only dependency for the Python matrix (ADR 0001 Z5): PyYAML for the YAML subset conformance test.
-# Compiled for the runtime floor so the same file installs on 3.9 and 3.13:
-#   uv pip compile --generate-hashes --universal --python-version 3.9 -o scripts/ci/requirements-test.txt scripts/ci/requirements-test.in
+# Compiled for the runtime floor so the same file installs on 3.9 and 3.13, with a 7-day release cooldown:
+#   uv pip compile --generate-hashes --universal --python-version 3.9 --exclude-newer 2026-10-28 -o scripts/ci/requirements-test.txt scripts/ci/requirements-test.in
 PyYAML==6.0.3

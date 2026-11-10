@@ -1,0 +1,21 @@
+name: bad harden expression
+on:
+  pull_request:
+permissions: {}
+jobs:
+  a:
+    runs-on: ubuntu-24.04
+    permissions:
+      id-token: write
+    concurrency:
+      group: a
+      cancel-in-progress: false
+    steps:
+      - uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
+        with:
+          egress-policy: block
+          disable-telemetry: true
+          disable-sudo-and-containers: true
+          allowed-endpoints: >
+            sts.${{ vars.AWS_REGION }}.amazonaws.com:443
+      - uses: aws-actions/configure-aws-credentials@0000000000000000000000000000000000000001 # v5.0.0

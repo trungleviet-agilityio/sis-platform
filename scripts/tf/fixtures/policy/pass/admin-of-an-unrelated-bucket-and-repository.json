@@ -1,0 +1,24 @@
+{
+  "documents": [
+    {
+      "name": "admin-of-an-unrelated-bucket-and-repository",
+      "policy": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Action": [
+              "s3:PutBucketPolicy",
+              "ecr:SetRepositoryPolicy"
+            ],
+            "Resource": [
+              "arn:aws:s3:::example-bucket",
+              "arn:aws:ecr:ap-southeast-1:123456789012:repository/other-app"
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "boundary_arn": "arn:aws:iam::123456789012:policy/sis-dev-workload-boundary"
+}

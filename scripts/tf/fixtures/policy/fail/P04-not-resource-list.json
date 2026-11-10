@@ -1,0 +1,22 @@
+{
+  "documents": [
+    {
+      "name": "P04-not-resource-list",
+      "policy": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Action": [
+              "s3:GetObject"
+            ],
+            "NotResource": [
+              "arn:aws:s3:::example-bucket/*"
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "boundary_arn": "arn:aws:iam::123456789012:policy/sis-dev-workload-boundary"
+}

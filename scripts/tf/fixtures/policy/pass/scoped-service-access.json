@@ -1,0 +1,21 @@
+{
+  "documents": [
+    {
+      "name": "scoped-service-access",
+      "policy": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Action": [
+              "lambda:UpdateFunctionCode",
+              "lambda:PublishVersion"
+            ],
+            "Resource": "arn:aws:lambda:ap-southeast-1:123456789012:function:sis-dev-app"
+          }
+        ]
+      }
+    }
+  ],
+  "boundary_arn": "arn:aws:iam::123456789012:policy/sis-dev-workload-boundary"
+}

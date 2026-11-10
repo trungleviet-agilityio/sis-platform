@@ -1,0 +1,18 @@
+{
+  "documents": [
+    {
+      "name": "P10-create-login-profile",
+      "policy": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Action": "iam:CreateLoginProfile",
+            "Resource": "arn:aws:iam::123456789012:user/*"
+          }
+        ]
+      }
+    }
+  ],
+  "boundary_arn": "arn:aws:iam::123456789012:policy/sis-dev-workload-boundary"
+}

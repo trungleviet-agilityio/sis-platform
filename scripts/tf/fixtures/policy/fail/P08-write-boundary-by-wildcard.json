@@ -1,0 +1,21 @@
+{
+  "documents": [
+    {
+      "name": "P08-write-boundary-by-wildcard",
+      "policy": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Action": [
+              "iam:SetDefaultPolicyVersion",
+              "iam:DeletePolicy"
+            ],
+            "Resource": "arn:aws:iam::123456789012:policy/sis-dev-*"
+          }
+        ]
+      }
+    }
+  ],
+  "boundary_arn": "arn:aws:iam::123456789012:policy/sis-dev-workload-boundary"
+}

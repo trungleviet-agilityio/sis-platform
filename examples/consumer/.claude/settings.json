@@ -1,0 +1,11 @@
+{
+  "extraKnownMarketplaces": {
+    "sis-platform": {
+      "source": {
+        "source": "github",
+        "repo": "trungleviet-agilityio/sis-platform",
+        "ref": "v0.2.0"
+      }
+    }
+  }
+}

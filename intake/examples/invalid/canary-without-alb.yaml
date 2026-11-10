@@ -1,11 +1,12 @@
 # expect: V05
 schema_version: 1
-project: {name: demo-app, prefix: demo}
-platform: {version: v0.1.0}
+project: {name: demo-app, prefix: demo, owner: demo-team}
+platform: {version: v0.2.0}
 runtime: {kind: ecs-fargate, front_door: none}
 budget: {monthly_usd: 100}
 envs:
   dev:
+    tier: nonprod
     account: dev
     region: ap-southeast-1
-    release: {strategy: canary, steps: [10, 100], bake_minutes: 5, rollback: alarm, engine: ecs-native}
+    release: {strategy: canary, steps: [10, 100], bake_minutes: 5, rollback: alarm, engine: ecs-native, probes: [/version]}

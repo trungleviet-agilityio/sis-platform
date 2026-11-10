@@ -24,16 +24,28 @@ venv: .venv-ci/.installed ## Hash-locked CI venv (.venv-ci) with pre-commit and 
 require-intake:
 	@test -d intake/sis_intake || { echo "error: intake/ is missing (the intake package is built in its own lane). Nothing to run." >&2; exit 1; }
 
-lint: .venv-ci/.installed ## pre-commit hooks on all files, shellcheck, actionlint and the repo guard self-tests
+lint: .venv-ci/.installed ## pre-commit hooks on all files, shellcheck, actionlint, the repo guard and platform script self-tests, and the doc reference check
 	PATH="$(CURDIR)/.venv-ci/bin:$$PATH" pre-commit run --all-files --show-diff-on-failure
 	shellcheck -x $$(find scripts -name '*.sh' | sort)
 	scripts/ci/selftest.sh
-	$(if $(wildcard .github/workflows/*.yml),actionlint,@echo "no workflows yet, skipping actionlint")
+	scripts/github/selftest.sh
+	$(PYTHON) scripts/ci/check_refs.py
+	$(if $(wildcard .github/workflows/*.yml .github/workflows/*.yaml),actionlint,@echo "no workflows yet, skipping actionlint")
 
-test: require-intake ## Intake unit tests (stdlib unittest)
+test: require-intake ## Intake and sis-team unit tests (stdlib unittest, 3.9 and 3.13)
 	$(PYTHON) -m unittest discover -s intake/tests -t intake
+	$(PYTHON) -m unittest discover -s plugins/sis-team/scripts -p 'test_*.py'
+	@if command -v $(VENV_PYTHON) >/dev/null 2>&1; then $(VENV_PYTHON) -m unittest discover -s plugins/sis-team/scripts -p 'test_*.py'; fi
+	$(PYTHON) -m unittest discover -s adapters/tests
+	$(PYTHON) -m unittest discover -s scripts/release/tests
+	$(PYTHON) -m unittest discover -s scripts/ci/tests
+	$(PYTHON) scripts/platform/check_lock.py examples/consumer --platform-checkout
 
 validate-examples: require-intake ## Every valid example exits 0, every invalid one exits non-zero
 	@scripts/ci/validate-examples.sh
 
 check: lint test validate-examples ## Everything a PR must pass (CI job `check`)
+
+.PHONY: tf-check
+tf-check: ## Offline Terraform checks for modules/: fmt, validate, tests, tflint, README, policy.py (no AWS)
+	scripts/tf/check.sh

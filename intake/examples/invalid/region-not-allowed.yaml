@@ -1,0 +1,8 @@
+# expect: V25
+schema_version: 1
+project: {name: demo-app, prefix: demo, owner: demo-team}
+platform: {version: v0.2.0}
+runtime: {kind: lambda-web}
+budget: {monthly_usd: 20}
+envs:
+  dev: {tier: nonprod, account: dev, region: us-east-1}

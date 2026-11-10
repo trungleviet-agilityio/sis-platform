@@ -1,0 +1,13 @@
+{
+  "deployment_branch_policy": {
+    "custom_branch_policies": true,
+    "protected_branches": false
+  },
+  "name": "staging",
+  "protection_rules": [
+    {
+      "id": 2,
+      "type": "branch_policy"
+    }
+  ]
+}

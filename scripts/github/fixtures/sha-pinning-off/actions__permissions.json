@@ -1,0 +1,5 @@
+{
+  "allowed_actions": "all",
+  "enabled": true,
+  "sha_pinning_required": false
+}

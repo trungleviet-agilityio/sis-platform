@@ -1,0 +1,18 @@
+{
+  "documents": [
+    {
+      "name": "P10-update-assume-role-env-wildcard",
+      "policy": {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Action": "iam:UpdateAssumeRolePolicy",
+            "Resource": "arn:aws:iam::123456789012:role/sis-dev-*"
+          }
+        ]
+      }
+    }
+  ],
+  "boundary_arn": "arn:aws:iam::123456789012:policy/sis-dev-workload-boundary"
+}

@@ -1,0 +1,61 @@
+name: apply without the AA3 ref gate in the credentialed job
+on:
+  workflow_call:
+    secrets:
+      AWS_ACCOUNT_ID:
+        required: true
+permissions: {}
+jobs:
+  resolve:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    outputs:
+      family: ${{ steps.r.outputs.family }}
+    steps:
+      - uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
+        with:
+          egress-policy: audit
+      - name: canonical gate
+        env:
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+        run: |
+          case "$EVENT" in
+            push | workflow_dispatch) ;;
+            *) echo "::error::apply runs only on push or workflow_dispatch, not on ${EVENT} (AA3)"; exit 1 ;;
+          esac
+          if [ "$REF" != "refs/heads/main" ]; then
+            echo "::error::apply runs only from refs/heads/main, not from ${REF} (O1)"
+            exit 1
+          fi
+      - id: r
+        run: echo family=lambda >> "$GITHUB_OUTPUT"
+  apply-lambda:
+    needs: resolve
+    if: needs.resolve.outputs.family == 'lambda'
+    runs-on: ubuntu-24.04
+    environment: dev
+    permissions:
+      contents: read
+      id-token: write
+    concurrency:
+      group: tf-dev
+      cancel-in-progress: false
+    steps:
+      - uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
+        with:
+          egress-policy: block
+          disable-telemetry: true
+          disable-sudo-and-containers: true
+          allowed-endpoints: >
+            github.com:443
+      - name: event check only, no ref check
+        env:
+          EVENT: ${{ github.event_name }}
+        run: |
+          case "$EVENT" in
+            push | workflow_dispatch) ;;
+            *) exit 1 ;;
+          esac
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0

@@ -1,0 +1,86 @@
+{
+  "environments": [
+    {
+      "deployment_branch_policy": {
+        "custom_branch_policies": true,
+        "protected_branches": false
+      },
+      "name": "dev",
+      "protection_rules": [
+        {
+          "id": 1,
+          "prevent_self_review": false,
+          "reviewers": [
+            {
+              "reviewer": {
+                "id": 1,
+                "login": "owner"
+              },
+              "type": "User"
+            }
+          ],
+          "type": "required_reviewers"
+        },
+        {
+          "id": 2,
+          "type": "branch_policy"
+        }
+      ]
+    },
+    {
+      "deployment_branch_policy": {
+        "custom_branch_policies": true,
+        "protected_branches": false
+      },
+      "name": "prod",
+      "protection_rules": [
+        {
+          "id": 1,
+          "prevent_self_review": false,
+          "reviewers": [
+            {
+              "reviewer": {
+                "id": 1,
+                "login": "owner"
+              },
+              "type": "User"
+            }
+          ],
+          "type": "required_reviewers"
+        },
+        {
+          "id": 2,
+          "type": "branch_policy"
+        }
+      ]
+    },
+    {
+      "deployment_branch_policy": {
+        "custom_branch_policies": true,
+        "protected_branches": false
+      },
+      "name": "staging",
+      "protection_rules": [
+        {
+          "id": 1,
+          "prevent_self_review": false,
+          "reviewers": [
+            {
+              "reviewer": {
+                "id": 1,
+                "login": "owner"
+              },
+              "type": "User"
+            }
+          ],
+          "type": "required_reviewers"
+        },
+        {
+          "id": 2,
+          "type": "branch_policy"
+        }
+      ]
+    }
+  ],
+  "total_count": 3
+}

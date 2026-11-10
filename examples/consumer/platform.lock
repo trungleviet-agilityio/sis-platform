@@ -1,0 +1,9 @@
+{
+  "lock_version": 1,
+  "version": "v0.2.0",
+  "release_sha": "0123456789abcdef0123456789abcdef01234567",
+  "workflow_sha": "fedcba9876543210fedcba9876543210fedcba98",
+  "trusted_workflow_shas": [
+    "fedcba9876543210fedcba9876543210fedcba98"
+  ]
+}

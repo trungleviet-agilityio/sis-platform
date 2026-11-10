@@ -1,0 +1,8 @@
+[
+  {
+    "enforcement": "active",
+    "id": 1,
+    "name": "main protection",
+    "target": "branch"
+  }
+]

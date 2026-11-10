@@ -1,11 +1,28 @@
 {
-  "version": 1,
+  "version": 2,
   "arch": "arm64",
   "arch_note": "arm64 is the default for new apps (owner answer Q4); the two lab examples keep x86_64.",
+  "allowed_regions": ["ap-southeast-1"],
+  "regulated_log_retention_days": 365,
+  "tiers": {
+    "nonprod": {
+      "rollback": "manual",
+      "log_retention_days": 14,
+      "availability_pct": 99.0
+    },
+    "prod": {
+      "steps": [10, 100],
+      "bake_minutes": 5,
+      "rollback": "alarm",
+      "probes": ["<health_path>", "/version"],
+      "log_retention_days": 90,
+      "availability_pct": 99.9
+    }
+  },
   "runtimes": {
     "lambda-web": {
       "front_door": "http-api",
-      "release_strategy": "all-at-once",
+      "release_strategy": {"nonprod": "all-at-once", "prod": "canary"},
       "network": "No VPC. If a DB needs a VPC: S3/DynamoDB gateway endpoints (free) plus only the interface endpoints needed; no NAT",
       "dr": "backup-restore (IaC + ECR + state); pilot-light = ECR cross-region replication + IaC in a second region",
       "cost": "arm64 for new apps; HTTP API throttle as cost ceiling (Function URL when budget-first; CloudFront + WAF only when public and abuse-prone); Compute Savings Plan only when steady prod spend is known",
@@ -13,7 +30,7 @@
     },
     "lambda-events": {
       "front_door": "none",
-      "release_strategy": "all-at-once",
+      "release_strategy": {"nonprod": "all-at-once", "prod": "all-at-once"},
       "network": "No VPC. If a DB needs a VPC: S3/DynamoDB gateway endpoints (free) plus only the interface endpoints needed; no NAT",
       "dr": "backup-restore (IaC + ECR + state); pilot-light = ECR cross-region replication + IaC in a second region",
       "cost": "arm64 for new apps; Compute Savings Plan only when steady prod spend is known",
@@ -21,7 +38,7 @@
     },
     "ecs-fargate": {
       "front_door": "alb",
-      "release_strategy": "rolling",
+      "release_strategy": {"nonprod": "rolling", "prod": "rolling"},
       "network": "Private subnets + VPC endpoints when few AZs and low egress; NAT when egress is broad (ask egress needs, COST08)",
       "dr": "backup-restore; warm-standby = scaled-down service in a second region",
       "cost": "arm64, Fargate Spot in dev only, Savings Plan for steady prod",
@@ -29,7 +46,7 @@
     },
     "ec2-asg": {
       "front_door": "alb",
-      "release_strategy": "rolling",
+      "release_strategy": {"nonprod": "rolling", "prod": "rolling"},
       "network": "Private + NAT or SSM endpoints",
       "dr": "AMI + launch template in a second region (pilot light)",
       "cost": "Graviton, Savings Plans, Spot in dev",
@@ -37,15 +54,16 @@
     },
     "eks-workload": {
       "front_door": "alb",
-      "release_strategy": "rolling",
+      "release_strategy": {"nonprod": "rolling", "prod": "rolling"},
       "network": "Shared cluster VPC; ALB via the Load Balancer Controller",
       "dr": "GitOps re-sync to a second cluster",
       "cost": "Shared cluster to amortize the control plane; Karpenter with Spot in dev",
       "sustainability": "Bin-packing on the shared cluster; arm64 node pools"
     }
   },
-  "release": {"rollback": "manual", "engine": "auto"},
-  "workload": {"shape": "web"},
+  "release": {"engine": "auto"},
+  "workload": {"shape": "web", "health_path": "/health", "p95_ms": 1000},
+  "compliance": {"data_class": "internal", "kms_cmk": false},
   "ci": {"provider": "github-actions"},
   "dr": {"strategy": "backup-restore"},
   "delivery": "push"
