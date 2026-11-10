@@ -9,9 +9,10 @@ argument-hint: "[PR number]"
 Target: PR `$ARGUMENTS` if given (`gh pr diff $ARGUMENTS --name-only`, and `gh pr checkout` only if the user
 agrees), otherwise the current branch against `main` (`git diff --name-only main...HEAD`).
 
-1. Collect the changed files and map them to phases and requirement IDs (`docs/requirements.md`).
+1. Collect the changed files and map them to phases and requirement IDs: use `docs/requirements.md` when the
+   repo has one, otherwise the decision IDs in `docs/adr/`.
 2. Spawn in one message: `sis-team:e2e`, `sis-team:reviewer`, `sis-team:security-reviewer`,
-   `sis-team:code-simplifier`, each with the changed files and requirement IDs.
+   `sis-team:code-simplifier`, each with the changed files and those IDs.
 3. Merge the results into one report: findings ranked Critical to Low with `file:line`, then the e2e table,
    then simplifier suggestions.
 4. Do not fix anything and do not post to GitHub unless the user asks.

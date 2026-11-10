@@ -25,7 +25,8 @@ Branch `docs/phase-<n>-checkpoint-<x>` from `origin/main` (fetch first), not fro
 
 1. **ADR:** insert `## Checkpoint <X> results (<YYYY-MM-DD>)` right above the checkpoint section: a table
    `| Step | Result |` with one row per step, then "Not observed: ..." if any.
-2. **Progress note** (outside the repo; its path is in `CLAUDE.local.md`; never commit it):
+2. **Progress note** (outside the repo; its path is in `CLAUDE.local.md`; never commit it). If that file is
+   missing, ask the owner for the note's path; do not create or guess one. Update:
    - the phase row: status (✅ when the last checkpoint passed, 🟡 otherwise), PRs, and a one-line result;
    - plan alignment text: what is now in place, and what is still to do;
    - open items: close the ones this checkpoint settled (say how), add new ones with source and target

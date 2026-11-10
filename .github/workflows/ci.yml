@@ -4,8 +4,8 @@
 name: CI
 
 on:
+  # No base-branch filter: stacked PRs target another branch and must still get checks.
   pull_request:
-    branches: [main]
   push:
     branches: [main]
 
