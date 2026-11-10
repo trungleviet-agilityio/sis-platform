@@ -8,8 +8,9 @@ oidc_token() {
   local response token
   require_cmd jq "install jq"
   require_cmd curl "install curl"
-  [ -n "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ] && [ -n "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" ] ||
+  if [ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ] || [ -z "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" ]; then
     die "no OIDC token request variables (the job needs id-token: write)"
+  fi
   response="$(curl -fsS -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
     "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=sts.amazonaws.com")" ||
     die "OIDC token request failed"

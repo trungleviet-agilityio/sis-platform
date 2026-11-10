@@ -18,7 +18,9 @@ label="$1"
 shift
 out_file=""
 if [ "$1" = "--out" ]; then
-  [ $# -ge 3 ] && [ -n "$2" ] || die "$usage"
+  if [ $# -lt 3 ] || [ -z "$2" ]; then
+    die "$usage"
+  fi
   out_file="$2"
   shift 2
 fi

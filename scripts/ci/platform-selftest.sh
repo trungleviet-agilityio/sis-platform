@@ -293,7 +293,9 @@ ci_inst="$ROOT/scripts/ci/install-tf-tools.sh"
 for var in TERRAFORM_VERSION TERRAFORM_SHA256; do
   a="$(sed -n "s/^${var}=\"\(.*\)\"\$/\1/p" "$inst")"
   b="$(sed -n "s/^${var}=\"\(.*\)\"\$/\1/p" "$ci_inst")"
-  [ -n "$a" ] && [ "$a" = "$b" ] || die "platform selftest: ${var} differs between install-terraform.sh and install-tf-tools.sh"
+  if [ -z "$a" ] || [ "$a" != "$b" ]; then
+    die "platform selftest: ${var} differs between install-terraform.sh and install-tf-tools.sh"
+  fi
 done
 grep -v '^ *#' "$ROOT/scripts/platform/requirements.txt" >"$tmp/req-a"
 grep -v '^ *#' "$ROOT/scripts/ci/requirements-test.txt" >"$tmp/req-b"
