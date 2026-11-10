@@ -53,12 +53,14 @@ has() {
   shift
   for s in "$@"; do grep -qF -- "$s" "$tmp/out" || die "platform selftest: ${label}: output lacks '${s}'"; done
 }
-# lacks <label> <fixed string>...: the last output holds none of them.
+# lacks <label> <fixed string>...: the last output holds none of them. Under GitHub Actions, mask prints
+# ::add-mask::<value> on purpose: the runner consumes that line and hides the value, so it is not log output.
 lacks() {
   local label="$1" s
   shift
+  grep -v '^::add-mask::' "$tmp/out" >"$tmp/out.logged" || true
   for s in "$@"; do
-    if grep -qF -- "$s" "$tmp/out"; then die "platform selftest: ${label}: output holds '${s}'"; fi
+    if grep -qF -- "$s" "$tmp/out.logged"; then die "platform selftest: ${label}: output holds '${s}'"; fi
   done
 }
 # piped <text> <command...>: feed text to the command on stdin.
