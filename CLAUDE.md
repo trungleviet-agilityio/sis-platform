@@ -15,12 +15,8 @@ rules in `.claude/rules/` load with the files they cover.
 
 - One phase at a time: ADR (`proposed`, then `accepted` by the owner), build, verify, then stop at the checkpoint
   with the exact commands for the owner.
-- Autopilot offline (owner, 2026-11-03), when the owner asks for it: several phases are drafted, cross-reviewed,
-  built and verified on a stack of local branches (`phase-<n>-<slug>`, each cut from the previous one) before the
-  owner accepts them. ADRs stay `proposed`. Each ADR gets its own docs PR (`docs/adr-NNNN-<slug>`, base `main`)
-  and each phase build gets a PR stacked on its ADR PR. Nothing is merged or applied, and nothing touches AWS. Every
-  ADR gets a challenger review and every build sub-ticket an independent peer review before the verify agents.
-  The owner accepts the whole stack at the end.
+- Each ADR gets its own docs PR (`docs/adr-NNNN-<slug>`); the phase build gets a PR stacked on it. The owner
+  merges.
 - Push feature branches and open PRs. Never merge, run or rerun a workflow, approve a deployment, write through
   `gh api`, or push to `main`. Never apply, destroy, import or move Terraform state, or touch secret values:
   prepare the command, the owner runs it.
@@ -58,6 +54,6 @@ rules in `.claude/rules/` load with the files they cover.
 | Agent | Owns |
 |---|---|
 | `backend-dev` | `intake/**` (manifest schema, validator, rules, intake plugin; Python) |
-| `devops-engineer` | `modules/**`, `adapters/**`, `.github/**`, `.claude-plugin/**`, `templates/**`, `Makefile`, `.pre-commit-config.yaml`, `pyproject.toml`, `mise.toml`, `scripts/**` |
+| `devops-engineer` | `modules/**`, `adapters/**`, `plugins/**`, `examples/**`, `project.env`, `.github/**`, `.claude-plugin/**`, `templates/**`, `Makefile`, `.pre-commit-config.yaml`, `pyproject.toml`, `mise.toml`, `scripts/**` |
 
 Verify agents never edit files; `reviewer` also checks docs drift.
