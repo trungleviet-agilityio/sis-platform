@@ -7,5 +7,5 @@ pre-commit==4.7.0
 PyYAML==6.0.3
 # mypy runs from this venv (a local pre-commit hook), so its stub package can be hash-locked: pre-commit
 # additional_dependencies cannot carry hashes. mypy 2.4.1 (2026-10-28) falls inside the cooldown, so 2.4.0 is pinned.
-mypy==2.4.0
-types-PyYAML==6.0.12.20260906
+mypy==2.4.1
+types-PyYAML==6.0.12.20261103
