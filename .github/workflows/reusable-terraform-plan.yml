@@ -61,7 +61,7 @@ jobs:
       region: ${{ steps.resolve.outputs.region }}
     steps:
       - name: Harden runner
-        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
         with:
           egress-policy: audit
           allowed-endpoints: >
@@ -158,7 +158,7 @@ jobs:
       # Lambda family hosts, ported from ship-it-serverless (A9). The state bucket is reached path style through the
       # one regional S3 host (scripts/platform/tf-init.sh), so no host holds the project prefix.
       - name: Harden runner
-        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
         with:
           egress-policy: block
           disable-telemetry: true
@@ -327,7 +327,7 @@ jobs:
       pull-requests: write # create or update the sticky plan comment
     steps:
       - name: Harden runner
-        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
         with:
           egress-policy: audit
           allowed-endpoints: >
